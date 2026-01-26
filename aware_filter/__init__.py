@@ -76,26 +76,6 @@ def insert_data(data, table_name):
         return False, str(e)
 
 
-@app.route('/webservice/index/<study_id>/<password>', methods=['POST'])
-def webservice_root(study_id, password):
-    """Root endpoint - AWARE may POST here with table name in data"""
-    if password != STUDY_PASSWORD:
-        logger.warning(f"Unauthorized attempt: study_id={study_id}")
-        stats['unauthorized_attempts'] += 1
-        return jsonify({'error': 'unauthorized'}), 401
-    
-    stats['total_requests'] += 1
-    
-    try:
-        data = request.get_json()
-        
-        # Log raw data to understand format
-        logger.info(f"POST to root endpoint")
-        logger.info(f"Content-Type: {request.content_type}")
-        logger.info(f"Data keys: {data.keys() if isinstance(data, dict) else 'list'}")
-        logger.info(f"Full data: {json.dumps(data, default=str)[:1000]}")
-
-
 @app.route('/webservice/index/<study_id>/<password>/<table_name>', methods=['POST'])
 def webservice_table(study_id, password, table_name):
     """
