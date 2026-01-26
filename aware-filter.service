@@ -4,7 +4,7 @@ After=network.target
 
 [Service]
 Type=simple
-User=www-data
+User=rantahj1
 WorkingDirectory=/u/24/rantahj1/unix/src/aware_filter
 Environment="PATH=/u/24/rantahj1/unix/src/aware_filter/venv/bin"
 ExecStart=/u/24/rantahj1/unix/src/aware_filter/venv/bin/aware-filter
