@@ -11,6 +11,10 @@ from mysql.connector import Error
 import logging
 import json
 from datetime import datetime
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
 
 app = Flask(__name__)
 
@@ -21,12 +25,23 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-DB_CONFIG = {
-    ...
+stats = {
+    'total_requests': 0,
+    'successful_inserts': 0,
+    'failed_inserts': 0,
+    'unauthorized_attempts': 0
 }
 
-STUDY_PASSWORD = "aware_study_password"  # Replace with actual study password
-TABLE_NAME = "aware_data"  # Replace with actual table name
+DB_CONFIG = {
+    'host': os.getenv('MYSQL_HOST', 'localhost'),
+    'port': int(os.getenv('MYSQL_PORT', 3306)),
+    'user': os.getenv('MYSQL_USER', 'root'),
+    'password': os.getenv('MYSQL_PASSWORD', ''),
+    'database': os.getenv('MYSQL_DATABASE', 'aware_database'),
+}
+
+STUDY_PASSWORD = os.getenv('STUDY_PASSWORD', 'aware_study_password')
+TABLE_NAME = os.getenv('TABLE_NAME', 'aware_data')
 
 def get_db_connection():
     """Establish a database connection."""
@@ -62,28 +77,25 @@ def insert_data(data):
         return False, str(e)
 
 
-
-@app.route('/webservice/<study_id>/<password>', methods=['POST'])
+@app.route('/webservice/index/<study_id>/<password>', methods=['POST'])
 def webservice_root(study_id, password):
-    """
-    Handle incoming POST requests from AWARE clients.
-    """
+    """Root endpoint - AWARE may POST here with table name in data"""
     if password != STUDY_PASSWORD:
-        logger.warning("Unauthorized access attempt")
-        return jsonify({"status": "error", "message": "Unauthorized"}), 401
-
+        logger.warning(f"Unauthorized attempt: study_id={study_id}")
+        stats['unauthorized_attempts'] += 1
+        return jsonify({'error': 'unauthorized'}), 401
+    
+    stats['total_requests'] += 1
+    
     try:
         data = request.get_json()
-        logger.info(f"Received POST at root: {len(data) if isinstance(data, list) else 1} records")
+        
+        # Log raw data to understand format
+        logger.info(f"POST to root endpoint")
+        logger.info(f"Content-Type: {request.content_type}")
+        logger.info(f"Data keys: {data.keys() if isinstance(data, dict) else 'list'}")
+        logger.info(f"Full data: {json.dumps(data, default=str)[:1000]}")
 
-        logger.debug(f"Data received: {json.dumps(data, indent=2)}")
-
-        return jsonify({"status": "success", "message": "Data received"}), 200
-    
-    except Exception as e:
-        logger.error(f"Error processing request: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-    
 
 @app.route('/webservice/index/<study_id>/<password>/<table_name>', methods=['POST'])
 def webservice_table(study_id, password, table_name):
@@ -146,4 +158,27 @@ def health():
         return jsonify({'status': 'unhealthy', 'database': 'disconnected'}), 503
 
 
+@app.route('/stats', methods=['GET'])
+def stats():
+    """Basic stats endpoint for monitoring"""
+    return jsonify({
+        'service': 'AWARE Webservice Receiver',
+        'timestamp': datetime.utcnow().isoformat(),
+        'endpoints': [
+            '/webservice/index/<study_id>/<password>',
+            '/webservice/index/<study_id>/<password>/<table_name>'
+        ]
+    }), 200
+
+if __name__ == '__main__':
+    logger.info("Starting AWARE Webservice Receiver")
+    logger.info(f"Database: {DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}")
+    
+    # Run with HTTPS (self-signed cert for testing)
+    app.run(
+        host='0.0.0.0',
+        port=8443,
+        ssl_context='adhoc',  # Self-signed cert for testing
+        debug=False
+    )
 

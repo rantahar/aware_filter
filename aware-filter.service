@@ -1,0 +1,17 @@
+[Unit]
+Description=AWARE Webservice Receiver
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/u/24/rantahj1/unix/src/aware_filter
+Environment="PATH=/u/24/rantahj1/unix/src/aware_filter/venv/bin"
+ExecStart=/u/24/rantahj1/unix/src/aware_filter/venv/bin/python aware_filter.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

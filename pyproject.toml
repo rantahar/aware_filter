@@ -8,9 +8,8 @@ version = "0.1.0"
 description = "Filters aware data and saves it in a compressed form"
 requires-python = ">=3.8"
 dependencies = [
-    "mysql-replication>=0.33",
-    "psycopg2-binary>=2.9.0",
-    "Pillow>=9.0.0",
+    "Flask>=2.0.0",
+    "mysql-connector-python>=8.0.0",
     "python-dotenv>=0.19.0",
 ]
 
