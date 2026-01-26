@@ -41,7 +41,6 @@ DB_CONFIG = {
 }
 
 STUDY_PASSWORD = os.getenv('STUDY_PASSWORD', 'aware_study_password')
-TABLE_NAME = os.getenv('TABLE_NAME', 'aware_data')
 
 def get_db_connection():
     """Establish a database connection."""
@@ -52,7 +51,7 @@ def get_db_connection():
         logger.error(f"Error connecting to database: {e}")
         return None
 
-def insert_data(data):
+def insert_data(data, table_name):
     """ Insert data into the database. """
     conn = get_db_connection()
     if conn is None:
@@ -64,7 +63,7 @@ def insert_data(data):
         # Build INSERT query
         columns = ', '.join(f'`{key}`' for key in data.keys())
         placeholders = ', '.join(['%s'] * len(data))
-        query = f"INSERT INTO `{TABLE_NAME}` ({columns}) VALUES ({placeholders})"
+        query = f"INSERT INTO `{table_name}` ({columns}) VALUES ({placeholders})"
 
         cursor.execute(query, list(data.values()))
         conn.commit()
@@ -119,7 +118,7 @@ def webservice_table(study_id, password, table_name):
             error_count = 0
             
             for record in data:
-                success, msg = insert_data(table_name, record)
+                success, msg = insert_data(record, table_name)
                 if success:
                     success_count += 1
                 else:
@@ -135,7 +134,7 @@ def webservice_table(study_id, password, table_name):
         else:
             # Single record
             logger.info(f"Received 1 record for table: {table_name}")
-            success, msg = insert_data(table_name, data)
+            success, msg = insert_data(data, table_name)
             
             if success:
                 return jsonify({'status': 'ok'}), 200
