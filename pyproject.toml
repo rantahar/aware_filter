@@ -5,20 +5,17 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "aware_filter"
 version = "0.1.0"
-description = "Filters aware data and saves it in a compressed form"
+description = "AWARE Webservice Receiver - receives JSON POST data from AWARE clients"
 requires-python = ">=3.8"
 dependencies = [
     "Flask>=2.0.0",
     "mysql-connector-python>=8.0.0",
     "python-dotenv>=0.19.0",
+    "pyOpenSSL>=21.0.0",
 ]
 
-[project.optional-dependencies]
-dev = [
-    "pytest>=7.0",
-    "black>=22.0",
-    "isort>=5.0",
-]
+[project.scripts]
+aware-filter = "aware_filter:main"
 
 [tool.setuptools]
 packages = ["aware_filter"]
