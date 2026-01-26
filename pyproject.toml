@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aware_filter"
+version = "0.1.0"
+description = "Filters aware data and saves it in a compressed form"
+requires-python = ">=3.8"
+dependencies = [
+    "mysql-replication>=0.33",
+    "psycopg2-binary>=2.9.0",
+    "Pillow>=9.0.0",
+    "python-dotenv>=0.19.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "black>=22.0",
+    "isort>=5.0",
+]
+
+[tool.setuptools]
+packages = ["aware_filter"]
