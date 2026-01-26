@@ -68,12 +68,17 @@ def insert_data(data, table_name):
         cursor.execute(query, list(data.values()))
         conn.commit()
 
-        logger.info("Data inserted successfully")
+        logger.info(f"Data inserted successfully into {table_name}")
+        stats['successful_inserts'] += 1
         return True, "Data inserted successfully"
 
     except Error as e:
         logger.error(f"Error inserting data: {e}")
+        stats['failed_inserts'] += 1
         return False, str(e)
+    finally:
+        cursor.close()
+        conn.close()
 
 
 @app.route('/webservice/index/<study_id>/<password>/<table_name>', methods=['POST'])
@@ -83,7 +88,10 @@ def webservice_table(study_id, password, table_name):
     """
     if password != STUDY_PASSWORD:
         logger.warning(f"Unauthorized attempt: study_id={study_id}, table={table_name}")
+        stats['unauthorized_attempts'] += 1
         return jsonify({'error': 'unauthorized'}), 401
+    
+    stats['total_requests'] += 1
     
     try:
         data = request.get_json()
@@ -138,26 +146,30 @@ def health():
 
 
 @app.route('/stats', methods=['GET'])
-def stats():
-    """Basic stats endpoint for monitoring"""
+def get_stats():
+    """Stats endpoint for monitoring"""
     return jsonify({
         'service': 'AWARE Webservice Receiver',
         'timestamp': datetime.utcnow().isoformat(),
+        'stats': stats,
         'endpoints': [
             '/webservice/index/<study_id>/<password>',
             '/webservice/index/<study_id>/<password>/<table_name>'
         ]
     }), 200
 
-if __name__ == '__main__':
+def main():
+    """Entry point for the aware-filter command"""
     logger.info("Starting AWARE Webservice Receiver")
     logger.info(f"Database: {DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}")
     
-    # Run with HTTPS (self-signed cert for testing)
     app.run(
         host='0.0.0.0',
         port=8443,
-        ssl_context='adhoc',  # Self-signed cert for testing
+        ssl_context='adhoc',
         debug=False
     )
+
+if __name__ == '__main__':
+    main()
 
