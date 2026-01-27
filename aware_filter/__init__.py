@@ -5,14 +5,14 @@ Receives JSON POST data from AWARE clients and writes to MySQL database.
 No filtering yet - just direct passthrough.
 """
 
-from flask import Flask, request, jsonify
-import mysql.connector
-from mysql.connector import Error
+from flask import Flask, jsonify, request
 import logging
-import json
 from datetime import datetime
 from dotenv import load_dotenv
 import os
+from .auth import login, check_token
+from .insertion import insert_records, get_db_connection, DB_CONFIG, STUDY_PASSWORD
+from .retrieval import query_data
 
 load_dotenv()
 
@@ -32,57 +32,8 @@ stats = {
     'unauthorized_attempts': 0
 }
 
-DB_CONFIG = {
-    'host': os.getenv('MYSQL_HOST', 'localhost'),
-    'port': int(os.getenv('MYSQL_PORT', 3306)),
-    'user': os.getenv('MYSQL_USER', 'root'),
-    'password': os.getenv('MYSQL_PASSWORD', ''),
-    'database': os.getenv('MYSQL_DATABASE', 'aware_database'),
-}
-
-STUDY_PASSWORD = os.getenv('STUDY_PASSWORD', 'aware_study_password')
-
-def get_db_connection():
-    """Establish a database connection."""
-    try:
-        connection = mysql.connector.connect(**DB_CONFIG)
-        return connection
-    except Error as e:
-        logger.error(f"Error connecting to database: {e}")
-        return None
-
-def insert_data(data, table_name):
-    """ Insert data into the database. """
-    conn = get_db_connection()
-    if conn is None:
-        return False, "Database connection failed"
-    
-    try:
-        cursor = conn.cursor()
-
-        # Build INSERT query
-        columns = ', '.join(f'`{key}`' for key in data.keys())
-        placeholders = ', '.join(['%s'] * len(data))
-        query = f"INSERT INTO `{table_name}` ({columns}) VALUES ({placeholders})"
-
-        cursor.execute(query, list(data.values()))
-        conn.commit()
-
-        logger.info(f"Data inserted successfully into {table_name}")
-        stats['successful_inserts'] += 1
-        return True, "Data inserted successfully"
-
-    except Error as e:
-        logger.error(f"Error inserting data: {e}")
-        stats['failed_inserts'] += 1
-        return False, str(e)
-    finally:
-        cursor.close()
-        conn.close()
-
-
 @app.route('/webservice/index/<study_id>/<password>/<table_name>', methods=['POST'])
-def webservice_table(study_id, password, table_name):
+def webservice_table_route(study_id, password, table_name):
     """
     Table-specific endpoint - receives data for specific table
     """
@@ -95,39 +46,12 @@ def webservice_table(study_id, password, table_name):
     
     try:
         data = request.get_json()
+        success, response_dict = insert_records(data, table_name, stats)
         
-        if not data:
-            return jsonify({'error': 'no data'}), 400
-        
-        # Handle both single object and array of objects
-        if isinstance(data, list):
-            logger.info(f"Received {len(data)} records for table: {table_name}")
-            success_count = 0
-            error_count = 0
-            
-            for record in data:
-                success, msg = insert_data(record, table_name)
-                if success:
-                    success_count += 1
-                else:
-                    error_count += 1
-                    logger.error(f"Failed to insert record: {msg}")
-            
-            return jsonify({
-                'status': 'ok',
-                'inserted': success_count,
-                'errors': error_count
-            }), 200
-            
+        if success:
+            return jsonify(response_dict), 200
         else:
-            # Single record
-            logger.info(f"Received 1 record for table: {table_name}")
-            success, msg = insert_data(data, table_name)
-            
-            if success:
-                return jsonify({'status': 'ok'}), 200
-            else:
-                return jsonify({'error': msg}), 500
+            return jsonify(response_dict), 500
         
     except Exception as e:
         logger.error(f"Error processing request: {e}")
@@ -157,6 +81,32 @@ def get_stats():
             '/webservice/index/<study_id>/<password>/<table_name>'
         ]
     }), 200
+
+@app.route('/login', methods=['POST'])
+def login_route():
+    """Authenticate and receive JWT token"""
+    return login(stats)
+
+
+@app.route('/data', methods=['GET'])
+def get_data_route():
+    """Retrieve data from a table with filters"""
+    # Validate token
+    token_error = check_token()
+    if token_error:
+        return token_error
+    
+    table_name = request.args.get('table')
+    device_id = request.args.get('device_id')
+    device_uid = request.args.get('device_uid')
+    start_time = request.args.get('start_time')
+    end_time = request.args.get('end_time')
+    
+    success, response_dict, status_code = query_data(
+        table_name, device_id, device_uid, start_time, end_time
+    )
+    
+    return jsonify(response_dict), status_code
 
 def main():
     """Entry point for the aware-filter command"""
