@@ -10,7 +10,6 @@ preload_app = True
 # SSL/TLS with self-signed certificate
 certfile = "/etc/ssl/aware-filter/cert.pem"
 keyfile = "/etc/ssl/aware-filter/key.pem"
-ssl_version = 5  # TLS 1.2
 # keyfile = "/path/to/your/private.key"
 # ssl_version = 5  # TLS 1.2
 
