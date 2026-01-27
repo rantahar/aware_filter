@@ -5,7 +5,9 @@ from datetime import datetime, timedelta
 import jwt
 import logging
 import os
+from dotenv import load_dotenv
 
+load_dotenv()
 logger = logging.getLogger(__name__)
 
 TOKEN_SECRET = os.getenv('TOKEN_SECRET', 'your-secret-key-change-in-production')
