@@ -8,7 +8,7 @@ User=rantahj1
 Group=rantahj1
 WorkingDirectory=/home/rantahj1/aware_filter
 Environment="PATH=/home/rantahj1/aware_filter/venv/bin:/usr/local/bin:/usr/bin:/bin"
-ExecStart=/home/rantahj1/aware_filter/venv/bin/python -m aware_filter
+ExecStart=/home/rantahj1/aware_filter/run-aware-filter.sh
 Restart=always
 RestartSec=10
 StandardOutput=journal
