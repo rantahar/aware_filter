@@ -3,10 +3,12 @@
 import mysql.connector
 from mysql.connector import Error
 import logging
+from dotenv import load_dotenv
 import os
 
 logger = logging.getLogger(__name__)
 
+load_dotenv()
 DB_CONFIG = {
     'host': os.getenv('MYSQL_HOST', 'localhost'),
     'port': int(os.getenv('MYSQL_PORT', 3306)),
