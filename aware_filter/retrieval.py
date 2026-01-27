@@ -89,3 +89,46 @@ def query_data(table_name, device_id, device_uid, start_time, end_time):
     finally:
         cursor.close()
         conn.close()
+
+
+def query_table(table_name, conditions=None, params=None):
+    """
+    Generic table query function.
+    
+    Args:
+        table_name: Name of the table to query
+        conditions: List of WHERE conditions (e.g., ['`field` = %s', '`timestamp` >= %s'])
+        params: List of parameter values corresponding to conditions
+    
+    Returns:
+        tuple: (success: bool, response_dict: dict, status_code: int)
+    """
+    if not table_name:
+        return False, {'error': 'missing table name'}, 400
+    
+    conn = get_db_connection()
+    if conn is None:
+        return False, {'error': 'database connection failed'}, 503
+    
+    try:
+        cursor = conn.cursor(dictionary=True)
+        
+        if conditions and params:
+            where_clause = ' AND '.join(conditions)
+            query = f"SELECT * FROM `{table_name}` WHERE {where_clause}"
+            cursor.execute(query, params)
+        else:
+            query = f"SELECT * FROM `{table_name}`"
+            cursor.execute(query)
+        
+        results = cursor.fetchall()
+        
+        logger.info(f"Retrieved {len(results)} records from {table_name}")
+        return True, {'data': results, 'count': len(results)}, 200
+    
+    except Error as e:
+        logger.error(f"Error querying table {table_name}: {e}")
+        return False, {'error': str(e)}, 500
+    finally:
+        cursor.close()
+        conn.close()

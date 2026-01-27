@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 import os
 from .auth import login, check_token
 from .insertion import insert_records, get_db_connection, DB_CONFIG, STUDY_PASSWORD
-from .retrieval import query_data
+from .retrieval import query_data, query_table
 
 load_dotenv()
 
@@ -20,7 +20,7 @@ app = Flask(__name__)
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,  # Changed to DEBUG
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
@@ -89,22 +89,35 @@ def login_route():
 
 
 @app.route('/data', methods=['GET'])
-def get_data_route():
-    """Retrieve data from a table with filters"""
+def query_route():
+    """Generic query endpoint - query any table with any conditions"""
     # Validate token
     token_error = check_token()
     if token_error:
         return token_error
     
     table_name = request.args.get('table')
-    device_id = request.args.get('device_id')
-    device_uid = request.args.get('device_uid')
-    start_time = request.args.get('start_time')
-    end_time = request.args.get('end_time')
+    if not table_name:
+        return jsonify({'error': 'missing table parameter'}), 400
     
-    success, response_dict, status_code = query_data(
-        table_name, device_id, device_uid, start_time, end_time
-    )
+    # Build WHERE conditions from all other query parameters
+    conditions = []
+    params = []
+    
+    for key, value in request.args.items():
+        if key == 'table':  # Skip the table parameter
+            continue
+        elif key == 'start_time':
+            conditions.append('`timestamp` >= %s')
+            params.append(value)
+        elif key == 'end_time':
+            conditions.append('`timestamp` <= %s')
+            params.append(value)
+        else:
+            conditions.append(f'`{key}` = %s')
+            params.append(value)
+    
+    success, response_dict, status_code = query_table(table_name, conditions, params)
     
     return jsonify(response_dict), status_code
 
