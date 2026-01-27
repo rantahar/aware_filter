@@ -115,7 +115,7 @@ def main():
     
     app.run(
         host='0.0.0.0',
-        port=8443,
+        port=3446,
         ssl_context='adhoc',
         debug=False
     )
