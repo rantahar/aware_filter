@@ -107,6 +107,7 @@ def login_route():
 @app.route('/data', methods=['GET'])
 def query_route():
     """Generic query endpoint - query any table with any conditions"""
+    request_start_time = datetime.utcnow()
     try:
         # Check memory usage before processing request
         memory_mb = check_memory_usage()
@@ -156,18 +157,42 @@ def query_route():
         
         success, response_dict, status_code = query_table(table_name, conditions, params, limit, offset)
         
+        # Calculate request duration
+        request_duration = (datetime.utcnow() - request_start_time).total_seconds()
+        
         # Check memory usage after query but before JSON serialization
         memory_after_query = check_memory_usage()
-        logger.debug(f"After database query. Memory: {memory_after_query:.1f} MB")
+        logger.debug(f"After database query. Memory: {memory_after_query:.1f} MB, Duration: {request_duration:.1f}s")
         
-        # Add a warning to response if dataset is large
+        # Add warnings to response
+        warnings = []
         if 'total_count' in response_dict and response_dict['total_count'] > 100000:
-            response_dict['warning'] = f"Large dataset ({response_dict['total_count']} total records). Consider using pagination with limit and offset parameters."
+            warnings.append(f"Large dataset ({response_dict['total_count']} total records). Consider using pagination with limit and offset parameters.")
+        
+        if request_duration > 60:  # Warn if query takes more than 1 minute
+            warnings.append(f"Long-running query ({request_duration:.1f}s). Consider adding more specific filters or pagination.")
+            logger.warning(f"Long query duration: {request_duration:.1f}s for table {table_name}")
+        
+        if warnings:
+            response_dict['warnings'] = warnings
+        
+        response_dict['query_duration_seconds'] = round(request_duration, 2)
         
         return jsonify(response_dict), status_code
     
     except Exception as e:
-        logger.error(f"Unexpected error in query route: {e}")
+        request_duration = (datetime.utcnow() - request_start_time).total_seconds()
+        logger.error(f"Unexpected error in query route after {request_duration:.1f}s: {e}")
+        
+        # Check if this might be a timeout-related error
+        if request_duration > 240:  # Close to our 300s timeout
+            logger.error(f"Query likely timed out after {request_duration:.1f}s. Consider using pagination or more specific filters.")
+            return jsonify({
+                'error': 'Query timeout - request took too long to process',
+                'suggestion': 'Use limit/offset parameters or more specific filters to reduce dataset size',
+                'duration_seconds': round(request_duration, 2)
+            }), 408  # Request Timeout
+        
         # Force garbage collection on error
         gc.collect()
         return jsonify({'error': 'Internal server error'}), 500
