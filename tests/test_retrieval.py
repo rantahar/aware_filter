@@ -6,45 +6,84 @@ from mysql.connector import Error as MySQLError
 from aware_filter.retrieval import query_data
 
 
+examples = {
+    'table_double': [
+        {
+            'device_id': "device_123",
+            'timestamp': 1706342400000,
+            'double_value_0': 23.5,
+            'double_value_1': 42.1,
+            'accuracy': 10
+        },
+        {
+            'device_id': "device_123",
+            'timestamp': 1706428800000,
+            'double_value_0': 25.0,
+            'double_value_1': 40.3,
+            'accuracy': 12
+        }
+    ],
+    'table_text': [
+        {
+            'device_id': "device_456",
+            'timestamp': 1706342400000,
+            'text_value': "example_text_data"
+        },
+        {
+            'device_id': "device_456",
+            'timestamp': 1706428800000,
+            'text_value': "another_text_entry"
+        }
+    ]
+}
+
+
 class TestQueryData:
     """Test cases for the query_data function"""
 
     @patch('aware_filter.retrieval.get_db_connection')
-    def test_query_data_with_device_id(self, mock_get_db):
-        """Test retrieving data with device_id filter"""
+    @pytest.mark.parametrize("table_type,data_list", [
+        ('sensor_data', examples['table_double']),
+        ('text_events', examples['table_text'])
+    ])
+    def test_query_data_with_device_id(self, mock_get_db, table_type, data_list):
+        """Test retrieving data with device_id filter for both data types"""
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
-        mock_cursor.fetchall.return_value = [
-            {'device_id': '123', 'timestamp': '2024-01-27', 'value': 42}
-        ]
+        mock_cursor.fetchall.return_value = data_list
         mock_conn.cursor.return_value = mock_cursor
         mock_get_db.return_value = mock_conn
 
-        success, response, status = query_data('sensor_data', '123', None, None, None)
+        device_id = data_list[0]['device_id']
+        success, response, status = query_data(table_type, device_id, None, None, None)
 
         assert success is True
         assert status == 200
-        assert response['count'] == 1
-        assert response['data'][0]['device_id'] == '123'
+        assert response['count'] == len(data_list)
+        assert response['data'][0]['device_id'] == device_id
         mock_cursor.close.assert_called_once()
         mock_conn.close.assert_called_once()
 
     @patch('aware_filter.retrieval.get_db_connection')
-    def test_query_data_with_device_uid(self, mock_get_db):
-        """Test retrieving data with device_uid filter"""
+    @pytest.mark.parametrize("table_type,data_list", [
+        ('sensor_data', examples['table_double']),
+        ('text_events', examples['table_text'])
+    ])
+    def test_query_data_with_device_uid(self, mock_get_db, table_type, data_list):
+        """Test retrieving data with device_uid filter for both data types"""
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
-        mock_cursor.fetchall.return_value = [
-            {'device_uid': 'uid-123', 'timestamp': '2024-01-27', 'value': 42}
-        ]
+        mock_cursor.fetchall.return_value = data_list
         mock_conn.cursor.return_value = mock_cursor
         mock_get_db.return_value = mock_conn
 
-        success, response, status = query_data('sensor_data', None, 'uid-123', None, None)
+        # Use device_id as a UID for testing
+        uid = data_list[0]['device_id']
+        success, response, status = query_data(table_type, None, uid, None, None)
 
         assert success is True
         assert status == 200
-        assert response['count'] == 1
+        assert response['count'] == len(data_list)
 
     @patch('aware_filter.retrieval.get_db_connection')
     def test_query_data_missing_table(self, mock_get_db):
@@ -65,20 +104,26 @@ class TestQueryData:
         assert 'missing device_id or device_uid' in response['error']
 
     @patch('aware_filter.retrieval.get_db_connection')
-    def test_query_data_with_time_filters(self, mock_get_db):
-        """Test retrieving data with time range filters"""
+    @pytest.mark.parametrize("table_type,data_list", [
+        ('sensor_data', examples['table_double']),
+        ('text_events', examples['table_text'])
+    ])
+    def test_query_data_with_time_filters(self, mock_get_db, table_type, data_list):
+        """Test retrieving data with time range filters for both data types"""
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
-        mock_cursor.fetchall.return_value = [
-            {'device_id': '123', 'timestamp': '2024-01-27', 'value': 42}
-        ]
+        mock_cursor.fetchall.return_value = data_list
         mock_conn.cursor.return_value = mock_cursor
         mock_get_db.return_value = mock_conn
 
+        device_id = data_list[0]['device_id']
+        start_time = data_list[0]['timestamp']
+        end_time = data_list[-1]['timestamp']
+        
         success, response, status = query_data(
-            'sensor_data', '123', None, '2024-01-01', '2024-01-31'
+            table_type, device_id, None, start_time, end_time
         )
-
+        
         assert success is True
         assert status == 200
         
@@ -89,31 +134,33 @@ class TestQueryData:
         
         assert '`timestamp` >=' in query
         assert '`timestamp` <=' in query
-        assert '2024-01-01' in params
-        assert '2024-01-31' in params
+        assert start_time in params
+        assert end_time in params
 
     @patch('aware_filter.retrieval.get_db_connection')
-    def test_query_data_db_connection_failed(self, mock_get_db):
-        """Test handling of database connection failure"""
+    @pytest.mark.parametrize("table_type", ['sensor_data', 'text_events'])
+    def test_query_data_db_connection_failed(self, mock_get_db, table_type):
+        """Test handling of database connection failure for both data types"""
         mock_get_db.return_value = None
 
-        success, response, status = query_data('sensor_data', '123', None, None, None)
-
+        success, response, status = query_data(table_type, 'device_123', None, None, None)
+        
         assert success is False
         assert status == 503
         assert 'database connection failed' in response['error']
 
     @patch('aware_filter.retrieval.get_db_connection')
-    def test_query_data_mysql_error(self, mock_get_db):
-        """Test handling of MySQL errors"""
+    @pytest.mark.parametrize("table_type", ['sensor_data', 'text_events'])
+    def test_query_data_mysql_error(self, mock_get_db, table_type):
+        """Test handling of MySQL errors for both data types"""
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         mock_cursor.execute.side_effect = MySQLError("Table not found")
         mock_conn.cursor.return_value = mock_cursor
         mock_get_db.return_value = mock_conn
 
-        success, response, status = query_data('sensor_data', '123', None, None, None)
-
+        success, response, status = query_data(table_type, 'device_123', None, None, None)
+        
         assert success is False
         assert status == 500
         assert 'Table not found' in response['error']
@@ -121,38 +168,40 @@ class TestQueryData:
         mock_conn.close.assert_called_once()
 
     @patch('aware_filter.retrieval.get_db_connection')
-    def test_query_data_empty_result(self, mock_get_db):
-        """Test retrieving data when no records match"""
+    @pytest.mark.parametrize("table_type", ['sensor_data', 'text_events'])
+    def test_query_data_empty_result(self, mock_get_db, table_type):
+        """Test retrieving data when no records match for both data types"""
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         mock_cursor.fetchall.return_value = []
         mock_conn.cursor.return_value = mock_cursor
         mock_get_db.return_value = mock_conn
 
-        success, response, status = query_data('sensor_data', '999', None, None, None)
-
+        success, response, status = query_data(table_type, 'device_999', None, None, None)
+        
         assert success is True
         assert status == 200
         assert response['count'] == 0
         assert response['data'] == []
 
     @patch('aware_filter.retrieval.get_db_connection')
-    def test_query_data_multiple_results(self, mock_get_db):
-        """Test retrieving multiple records"""
+    @pytest.mark.parametrize("table_type,data_list", [
+        ('sensor_data', examples['table_double']),
+        ('text_events', examples['table_text'])
+    ])
+    def test_query_data_multiple_results(self, mock_get_db, table_type, data_list):
+        """Test retrieving multiple records from both data types"""
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
-        mock_cursor.fetchall.return_value = [
-            {'device_id': '123', 'timestamp': '2024-01-27', 'value': 42},
-            {'device_id': '123', 'timestamp': '2024-01-28', 'value': 43},
-            {'device_id': '123', 'timestamp': '2024-01-29', 'value': 44},
-        ]
+        mock_cursor.fetchall.return_value = data_list
         mock_conn.cursor.return_value = mock_cursor
         mock_get_db.return_value = mock_conn
 
-        success, response, status = query_data('sensor_data', '123', None, None, None)
+        device_id = data_list[0]['device_id']
+        success, response, status = query_data(table_type, device_id, None, None, None)
 
         assert success is True
         assert status == 200
-        assert response['count'] == 3
-        assert len(response['data']) == 3
+        assert response['count'] == len(data_list)
+        assert len(response['data']) == len(data_list)
 
