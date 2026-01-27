@@ -203,7 +203,7 @@ class TestQueryData:
         
         assert success is True
         assert status == 200
-        assert response['count'] == 0§
+        assert response['count'] == 0
         assert response['data'] == []
         assert response['total_count'] == 0
         assert 'has_more' in response
