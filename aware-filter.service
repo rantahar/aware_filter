@@ -5,9 +5,9 @@ After=network.target
 [Service]
 Type=simple
 User=rantahj1
-WorkingDirectory=/u/24/rantahj1/unix/src/aware_filter
-Environment="PATH=/u/24/rantahj1/unix/src/aware_filter/venv/bin"
-ExecStart=/u/24/rantahj1/unix/src/aware_filter/venv/bin/aware-filter
+WorkingDirectory=%h/aware_filter
+EnvironmentFile=-%h/aware_filter/.env.service
+ExecStart=/usr/bin/env python3 -m aware_filter
 Restart=always
 RestartSec=10
 StandardOutput=journal
