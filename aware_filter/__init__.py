@@ -7,6 +7,8 @@ No filtering yet - just direct passthrough.
 
 from flask import Flask, jsonify, request
 import logging
+import psutil
+import gc
 from datetime import datetime
 from dotenv import load_dotenv
 import os
@@ -24,6 +26,20 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+def check_memory_usage():
+    """Check current memory usage and log warnings if high"""
+    process = psutil.Process()
+    memory_info = process.memory_info()
+    memory_mb = memory_info.rss / 1024 / 1024
+    
+    if memory_mb > 400:  # Warning if over 400MB
+        logger.warning(f"High memory usage: {memory_mb:.1f} MB")
+        if memory_mb > 500:  # Force garbage collection if over 500MB
+            gc.collect()
+            logger.info("Forced garbage collection due to high memory usage")
+    
+    return memory_mb
 
 stats = {
     'total_requests': 0,
@@ -91,35 +107,70 @@ def login_route():
 @app.route('/data', methods=['GET'])
 def query_route():
     """Generic query endpoint - query any table with any conditions"""
-    # Validate token
-    token_error = check_token()
-    if token_error:
-        return token_error
+    try:
+        # Check memory usage before processing request
+        memory_mb = check_memory_usage()
+        logger.debug(f"Processing data query request. Current memory: {memory_mb:.1f} MB")
+        
+        # Validate token
+        token_error = check_token()
+        if token_error:
+            return token_error
+        
+        table_name = request.args.get('table')
+        if not table_name:
+            return jsonify({'error': 'missing table parameter'}), 400
+        
+        # Build WHERE conditions from query parameters
+        conditions = []
+        params = []
+        limit = None
+        offset = None
+        
+        for key, value in request.args.items():
+            if key == 'table':  # Skip the table parameter
+                continue
+            elif key == 'start_time':
+                conditions.append('`timestamp` >= %s')
+                params.append(value)
+            elif key == 'end_time':
+                conditions.append('`timestamp` <= %s')
+                params.append(value)
+            elif key == 'limit':
+                try:
+                    limit = int(value)
+                    if limit <= 0:
+                        return jsonify({'error': 'limit must be positive'}), 400
+                except ValueError:
+                    return jsonify({'error': 'limit must be a valid integer'}), 400
+            elif key == 'offset':
+                try:
+                    offset = int(value)
+                    if offset < 0:
+                        return jsonify({'error': 'offset must be non-negative'}), 400
+                except ValueError:
+                    return jsonify({'error': 'offset must be a valid integer'}), 400
+            else:
+                conditions.append(f'`{key}` = %s')
+                params.append(value)
+        
+        success, response_dict, status_code = query_table(table_name, conditions, params, limit, offset)
+        
+        # Check memory usage after query but before JSON serialization
+        memory_after_query = check_memory_usage()
+        logger.debug(f"After database query. Memory: {memory_after_query:.1f} MB")
+        
+        # Add a warning to response if dataset is large
+        if 'total_count' in response_dict and response_dict['total_count'] > 100000:
+            response_dict['warning'] = f"Large dataset ({response_dict['total_count']} total records). Consider using pagination with limit and offset parameters."
+        
+        return jsonify(response_dict), status_code
     
-    table_name = request.args.get('table')
-    if not table_name:
-        return jsonify({'error': 'missing table parameter'}), 400
-    
-    # Build WHERE conditions from all other query parameters
-    conditions = []
-    params = []
-    
-    for key, value in request.args.items():
-        if key == 'table':  # Skip the table parameter
-            continue
-        elif key == 'start_time':
-            conditions.append('`timestamp` >= %s')
-            params.append(value)
-        elif key == 'end_time':
-            conditions.append('`timestamp` <= %s')
-            params.append(value)
-        else:
-            conditions.append(f'`{key}` = %s')
-            params.append(value)
-    
-    success, response_dict, status_code = query_table(table_name, conditions, params)
-    
-    return jsonify(response_dict), status_code
+    except Exception as e:
+        logger.error(f"Unexpected error in query route: {e}")
+        # Force garbage collection on error
+        gc.collect()
+        return jsonify({'error': 'Internal server error'}), 500
 
 def main():
     """Entry point for the aware-filter command"""

@@ -51,6 +51,7 @@ class TestQueryData:
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         mock_cursor.fetchall.return_value = data_list
+        mock_cursor.fetchone.return_value = {'total': len(data_list)}  # Mock the count query
         mock_conn.cursor.return_value = mock_cursor
         mock_get_db.return_value = mock_conn
 
@@ -61,6 +62,10 @@ class TestQueryData:
         assert status == 200
         assert response['count'] == len(data_list)
         assert response['data'][0]['device_id'] == device_id
+        assert response['total_count'] == len(data_list)  # Check new pagination field
+        assert 'limit' in response  # Check pagination metadata
+        assert 'offset' in response
+        assert 'has_more' in response
         mock_cursor.close.assert_called_once()
         mock_conn.close.assert_called_once()
 
@@ -74,6 +79,7 @@ class TestQueryData:
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         mock_cursor.fetchall.return_value = data_list
+        mock_cursor.fetchone.return_value = {'total': len(data_list)}  # Mock the count query
         mock_conn.cursor.return_value = mock_cursor
         mock_get_db.return_value = mock_conn
 
@@ -84,6 +90,10 @@ class TestQueryData:
         assert success is True
         assert status == 200
         assert response['count'] == len(data_list)
+        assert response['total_count'] == len(data_list)  # Check new pagination field
+        assert 'limit' in response  # Check pagination metadata
+        assert 'offset' in response
+        assert 'has_more' in response
 
     @patch('aware_filter.retrieval.get_db_connection')
     def test_query_data_missing_table(self, mock_get_db):
@@ -113,6 +123,7 @@ class TestQueryData:
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         mock_cursor.fetchall.return_value = data_list
+        mock_cursor.fetchone.return_value = {'total': len(data_list)}  # Mock the count query
         mock_conn.cursor.return_value = mock_cursor
         mock_get_db.return_value = mock_conn
 
@@ -126,11 +137,21 @@ class TestQueryData:
         
         assert success is True
         assert status == 200
+        assert response['total_count'] == len(data_list)  # Check new pagination field
         
         # Verify the query was constructed with time filters
-        call_args = mock_cursor.execute.call_args
-        query = call_args[0][0]
-        params = call_args[0][1]
+        # Note: now there are two execute calls (count + main query)
+        call_args_list = mock_cursor.execute.call_args_list
+        assert len(call_args_list) >= 1  # At least one call for the main query
+        
+        # Check the main query (should be the second call)
+        if len(call_args_list) >= 2:
+            main_query_call = call_args_list[1]  # Second call is main query
+        else:
+            main_query_call = call_args_list[0]  # Fallback to first call
+            
+        query = main_query_call[0][0]
+        params = main_query_call[0][1]
         
         assert '`timestamp` >=' in query
         assert '`timestamp` <=' in query
@@ -174,6 +195,7 @@ class TestQueryData:
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         mock_cursor.fetchall.return_value = []
+        mock_cursor.fetchone.return_value = {'total': 0}  # Mock the count query
         mock_conn.cursor.return_value = mock_cursor
         mock_get_db.return_value = mock_conn
 
@@ -181,8 +203,10 @@ class TestQueryData:
         
         assert success is True
         assert status == 200
-        assert response['count'] == 0
+        assert response['count'] == 0§
         assert response['data'] == []
+        assert response['total_count'] == 0
+        assert 'has_more' in response
 
     @patch('aware_filter.retrieval.get_db_connection')
     @pytest.mark.parametrize("table_type,data_list", [
@@ -194,6 +218,7 @@ class TestQueryData:
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         mock_cursor.fetchall.return_value = data_list
+        mock_cursor.fetchone.return_value = {'total': len(data_list)}  # Mock the count query
         mock_conn.cursor.return_value = mock_cursor
         mock_get_db.return_value = mock_conn
 
@@ -204,4 +229,6 @@ class TestQueryData:
         assert status == 200
         assert response['count'] == len(data_list)
         assert len(response['data']) == len(data_list)
+        assert response['total_count'] == len(data_list)
+        assert 'has_more' in response
 
