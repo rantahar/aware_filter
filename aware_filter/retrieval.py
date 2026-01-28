@@ -45,6 +45,20 @@ def query_table(table_name, conditions=None, params=None, limit=None, offset=Non
         operation_start = time.time()
         cursor = conn.cursor(dictionary=True)
         
+        # Get total count for pagination info
+        count_start = time.time()
+        if conditions and params:
+            where_clause = ' AND '.join(conditions)
+            count_query = f"SELECT COUNT(*) as total FROM `{table_name}` WHERE {where_clause}"
+            cursor.execute(count_query, params)
+        else:
+            count_query = f"SELECT COUNT(*) as total FROM `{table_name}`"
+            cursor.execute(count_query)
+        
+        count_result = cursor.fetchone()
+        total_count = count_result['total'] if count_result and 'total' in count_result else 0
+        count_time = time.time() - count_start
+        
         query_start = time.time()
         
         # Build main query with pagination
@@ -66,13 +80,15 @@ def query_table(table_name, conditions=None, params=None, limit=None, offset=Non
         response_data = {
             'data': results, 
             'count': len(results),
+            'total_count': total_count,
             'limit': limit,
-            'offset': offset
+            'offset': offset,
+            'has_more': (offset + len(results)) < total_count
         }
         serialize_time = time.time() - serialize_start
         total_time = time.time() - operation_start
         
-        logger.info(f"Retrieved {len(results)} records from {table_name} | Query: {query_execute_time*1000:.1f}ms | Fetch: {fetch_time*1000:.1f}ms | Serialize: {serialize_time*1000:.2f}ms | Total: {total_time*1000:.1f}ms")
+        logger.info(f"Retrieved {len(results)} records from {table_name} (total: {total_count}) | Count: {count_time*1000:.1f}ms | Query: {query_execute_time*1000:.1f}ms | Fetch: {fetch_time*1000:.1f}ms | Serialize: {serialize_time*1000:.2f}ms | Total: {total_time*1000:.1f}ms")
         
         return True, response_data, 200
     
