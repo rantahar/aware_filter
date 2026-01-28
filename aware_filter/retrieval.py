@@ -42,6 +42,7 @@ def query_table(table_name, conditions=None, params=None, limit=None, offset=Non
         return False, {'error': 'database connection failed'}, 503
     
     try:
+        operation_start = time.time()
         cursor = conn.cursor(dictionary=True)
         
         query_start = time.time()
@@ -69,13 +70,15 @@ def query_table(table_name, conditions=None, params=None, limit=None, offset=Non
             'offset': offset
         }
         serialize_time = time.time() - serialize_start
+        total_time = time.time() - operation_start
         
-        logger.info(f"Retrieved {len(results)} records from {table_name} | Query: {query_execute_time*1000:.1f}ms | Fetch: {fetch_time*1000:.1f}ms | Serialize: {serialize_time*1000:.2f}ms")
+        logger.info(f"Retrieved {len(results)} records from {table_name} | Query: {query_execute_time*1000:.1f}ms | Fetch: {fetch_time*1000:.1f}ms | Serialize: {serialize_time*1000:.2f}ms | Total: {total_time*1000:.1f}ms")
         
         return True, response_data, 200
     
     except Error as e:
-        logger.error(f"Error querying table {table_name}: {e}")
+        total_time = time.time() - operation_start
+        logger.error(f"Error querying table {table_name}: {e} | Total time: {total_time*1000:.1f}ms")
         return False, {'error': str(e)}, 500
     finally:
         cursor.close()
