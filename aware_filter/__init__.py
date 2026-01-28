@@ -323,7 +323,7 @@ def tables_for_device_route():
         
         # Check each table for data matching device_id or device_uid
         for table_name in all_tables:
-            if table_name in ['device_lookup', 'aware_device', 'aware_log']:  # Skip device_lookup itself
+            if table_name in ['device_lookup', 'aware_device', 'aware_log', 'mqtt_history', 'mqtt_history_transformed', 'encryption_skip_list', 'device_index']:
                 continue
             
             if not table_name.endswith('_transformed'):
@@ -361,7 +361,7 @@ def tables_for_device_route():
     
     except Exception as e:
         elapsed = time.time() - route_start_time
-        logger.error(f"Error in tables_for_device_route after {elapsed:.3f}s: {e}")
+        logger.error(f"Error for device {device_id} in tables_for_device_route after {elapsed:.3f}s: {e}")
         return jsonify({'error': 'Internal server error'}), 500
 
 
