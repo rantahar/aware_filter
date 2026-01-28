@@ -2,6 +2,7 @@
 
 from mysql.connector import Error
 import logging
+import time
 from .connection import get_connection
 
 logger = logging.getLogger(__name__)
@@ -43,6 +44,8 @@ def query_table(table_name, conditions=None, params=None, limit=None, offset=Non
     try:
         cursor = conn.cursor(dictionary=True)
         
+        query_start = time.time()
+        
         # Build main query with pagination
         if conditions and params:
             where_clause = ' AND '.join(conditions)
@@ -52,16 +55,22 @@ def query_table(table_name, conditions=None, params=None, limit=None, offset=Non
             query = f"SELECT * FROM `{table_name}` LIMIT {limit} OFFSET {offset}"
             cursor.execute(query)
         
+        query_execute_time = time.time() - query_start
+        
+        fetch_start = time.time()
         results = cursor.fetchall()
+        fetch_time = time.time() - fetch_start
         
-        logger.info(f"Retrieved {len(results)} records from {table_name}")
-        
+        serialize_start = time.time()
         response_data = {
             'data': results, 
             'count': len(results),
             'limit': limit,
             'offset': offset
         }
+        serialize_time = time.time() - serialize_start
+        
+        logger.info(f"Retrieved {len(results)} records from {table_name} | Query: {query_execute_time*1000:.1f}ms | Fetch: {fetch_time*1000:.1f}ms | Serialize: {serialize_time*1000:.2f}ms")
         
         return True, response_data, 200
     
