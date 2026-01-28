@@ -206,6 +206,8 @@ def query_route():
         params = []
         limit = None
         offset = None
+        device_id_index = None  # Track which index device_id condition is at
+        device_id_param_count = 0  # Track how many device_id params
         
         # Check if device_id is provided and needs to be converted to device_uid for transformed tables
         device_id_param = request.args.get('device_id')
@@ -229,6 +231,8 @@ def query_route():
             elif key == 'device_id':  # Handle device_id specially
                 if device_id_param:
                     device_ids = [d.strip() for d in device_id_param.split(',') if d.strip()]
+                    device_id_index = len(conditions)  # Record where this condition is
+                    device_id_param_count = len(device_ids)  # Record how many params
                     if len(device_ids) > 1:
                         placeholders = ', '.join(['%s'] * len(device_ids))
                         conditions.append(f'`device_id` IN ({placeholders})')
@@ -280,8 +284,25 @@ def query_route():
         # Query transformed table with device_uid if device_ids were provided and device_uids exist
         if device_uids:
             transformed_table_name = f"{table_name}_transformed"
-            transformed_conditions = [c for c in conditions if 'device_id' not in c]
-            transformed_params = [p for i, p in enumerate(params) if i not in [i for i, c in enumerate(conditions) if 'device_id' in c]]
+            # Build transformed conditions by excluding device_id condition and replacing with device_uid
+            transformed_conditions = []
+            transformed_params = []
+            
+            param_offset = 0  # Track how many params we've consumed
+            
+            for i, condition in enumerate(conditions):
+                param_count = condition.count('%s')  # How many params this condition uses
+                
+                if i == device_id_index:
+                    # Skip device_id condition and its params
+                    param_offset += param_count
+                    continue
+                
+                # Add this condition to transformed conditions
+                transformed_conditions.append(condition)
+                # Add the corresponding params
+                transformed_params.extend(params[param_offset:param_offset + param_count])
+                param_offset += param_count
             
             # Add device_uid condition
             if len(device_uids) > 1:
