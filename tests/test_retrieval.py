@@ -339,7 +339,7 @@ class TestTableHasData:
         # Verify both parameters were passed
         mock_cursor.execute.assert_called_once()
         call_args = mock_cursor.execute.call_args[0]
-        assert call_args[1] == ('123', '2024-01-01')
+        assert call_args[1] == ['123', '2024-01-01']
     
     @patch('aware_filter.retrieval.get_connection')
     def test_table_has_data_with_invalid_table_name(self, mock_get_connection):
