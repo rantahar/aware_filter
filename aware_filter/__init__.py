@@ -28,12 +28,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Register shutdown handler to close database connection
-@app.teardown_appcontext
-def shutdown_connection(exception=None):
-    """Close database connection on app shutdown."""
-    close_connection()
-
 def check_memory_usage():
     """Check current memory usage and log warnings if high"""
     process = psutil.Process()

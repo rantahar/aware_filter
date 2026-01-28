@@ -4,6 +4,7 @@ import mysql.connector
 from mysql.connector import Error
 import logging
 import os
+import atexit
 from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
@@ -63,3 +64,7 @@ def close_connection():
             logger.error(f"Error closing database connection: {e}")
         finally:
             _connection = None
+
+
+# Register cleanup to run only on actual app shutdown
+atexit.register(close_connection)
