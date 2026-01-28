@@ -8,6 +8,55 @@ from .connection import get_connection
 logger = logging.getLogger(__name__)
 
 
+def table_has_data(table_name, conditions=None, params=None):
+    """
+    Check if a table has any data matching the given conditions.
+    Fast check without COUNT(*) - only returns True/False.
+    
+    Args:
+        table_name: Name of the table to check
+        conditions: List of WHERE conditions (e.g., ['`field` = %s'])
+        params: List of parameter values corresponding to conditions
+    
+    Returns:
+        tuple: (success: bool, has_data: bool, status_code: int)
+    """
+    if not table_name:
+        return False, False, 400
+    
+    conn = get_connection()
+    if conn is None:
+        return False, False, 503
+    
+    try:
+        cursor = conn.cursor()
+        query_start = time.time()
+        
+        # Build query to check existence
+        if conditions and params:
+            where_clause = ' AND '.join(conditions)
+            query = f"SELECT 1 FROM `{table_name}` WHERE {where_clause} LIMIT 1"
+            cursor.execute(query, params)
+        else:
+            query = f"SELECT 1 FROM `{table_name}` LIMIT 1"
+            cursor.execute(query)
+        
+        result = cursor.fetchone()
+        has_data = result is not None
+        
+        query_time = (time.time() - query_start) * 1000
+        logger.debug(f"Checked existence in {table_name}: {has_data} | Query: {query_time:.1f}ms")
+        
+        return True, has_data, 200
+    
+    except Error as e:
+        query_time = (time.time() - query_start) * 1000
+        logger.error(f"Error checking table {table_name}: {e} | Query time: {query_time:.1f}ms")
+        return False, False, 500
+    finally:
+        cursor.close()
+
+
 def get_all_tables():
     """
     Get list of all tables in the database.

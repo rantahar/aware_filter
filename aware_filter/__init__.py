@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 import os
 from .auth import login, check_token
 from .insertion import insert_records, STUDY_PASSWORD
-from .retrieval import query_table, get_all_tables
+from .retrieval import query_table, get_all_tables, table_has_data
 from .connection import get_connection
 
 load_dotenv()
@@ -327,8 +327,8 @@ def tables_for_device_route():
                 continue
             
             if not table_name.endswith('_transformed'):
-                success, result, _ = query_table(table_name, ['`device_id` = %s'], [device_id], limit=1)
-                if success and result.get('count', 0) > 0:
+                success, result, _ = table_has_data(table_name, ['`device_id` = %s'], [device_id])
+                if success and result:
                     tables_with_data.append({
                         'table': table_name,
                         'matched_by': 'device_id'
@@ -337,8 +337,8 @@ def tables_for_device_route():
             
             else:
                 if device_uid:
-                    success, result, _ = query_table(table_name, ['`device_uid` = %s'], [device_uid], limit=1)
-                    if success and result.get('count', 0) > 0:
+                    success, result, _ = table_has_data(table_name, ['`device_uid` = %s'], [device_uid])
+                    if success and result:
                         # Remove "_transformed" suffix if present when matched by device_uid
                         display_table_name = table_name
                         if table_name.endswith('_transformed'):
