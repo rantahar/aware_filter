@@ -14,8 +14,8 @@ from dotenv import load_dotenv
 import os
 from .auth import login, check_token
 from .insertion import insert_records, STUDY_PASSWORD
-from .retrieval import query_table
-from .connection import get_connection, close_connection
+from .retrieval import query_table, get_all_tables
+from .connection import get_connection
 
 load_dotenv()
 
@@ -53,6 +53,19 @@ stats = {
 def webservice_table_route(study_id, password, table_name):
     """
     Table-specific endpoint - receives data for specific table
+    
+    Path Parameters:
+        study_id (str): Study identifier
+        password (str): Study password for authentication
+        table_name (str): Name of the table to insert data into
+    
+    Request Body:
+        JSON array or object containing records to insert
+    
+    Returns:
+        200: Successful insertion with record count
+        401: Invalid password
+        500: Database error or insertion failure
     """
     if password != STUDY_PASSWORD:
         logger.warning(f"Unauthorized attempt: study_id={study_id}, table={table_name}")
@@ -77,7 +90,13 @@ def webservice_table_route(study_id, password, table_name):
 
 @app.route('/health', methods=['GET'])
 def health():
-    """Health check endpoint"""
+    """
+    Health check endpoint
+    
+    Returns:
+        200: Service is healthy and database is connected
+        503: Database connection failed or service is unhealthy
+    """
     conn = get_connection()
     if conn:
         return jsonify({'status': 'healthy', 'database': 'connected'}), 200
@@ -87,7 +106,16 @@ def health():
 
 @app.route('/stats', methods=['GET'])
 def get_stats():
-    """Stats endpoint for monitoring"""
+    """
+    Stats endpoint for monitoring
+    
+    Returns:
+        Service name, current timestamp, and statistics including:
+        - total_requests: Total requests processed
+        - successful_inserts: Successful data insertions
+        - failed_inserts: Failed data insertions
+        - unauthorized_attempts: Failed authentication attempts
+    """
     return jsonify({
         'service': 'AWARE Webservice Receiver',
         'timestamp': datetime.utcnow().isoformat(),
@@ -100,13 +128,41 @@ def get_stats():
 
 @app.route('/login', methods=['POST'])
 def login_route():
-    """Authenticate and receive JWT token"""
+    """
+    Authenticate and receive JWT token
+    
+    Request Body:
+        JSON object with authentication credentials
+    
+    Returns:
+        200: Authentication successful, returns JWT token
+        401: Authentication failed
+    """
     return login(stats)
 
 
 @app.route('/data', methods=['GET'])
 def query_route():
-    """Generic query endpoint - query any table with any conditions"""
+    """
+    Generic query endpoint - query any table with any conditions
+    
+    Query Parameters:
+        table (str, required): Name of the table to query
+        device_id (str, optional): Filter by device_id column
+        device_uid (str, optional): Filter by device_uid column
+        timestamp (str, optional): Filter by exact timestamp
+        start_time (str, optional): Filter records with timestamp >= start_time
+        end_time (str, optional): Filter records with timestamp <= end_time
+        limit (int, optional): Maximum records to return (default: 10000, max: 50000)
+        offset (int, optional): Number of records to skip for pagination (default: 0)
+        <any_column> (str, optional): Filter by any table column using equality
+    
+    Returns:
+        200: Query successful with data, count, total_count, limit, offset, has_more
+        400: Invalid parameters or missing table name
+        404: Table not found
+        500: Database error
+    """
     request_start_time = datetime.utcnow()
     try:
         # Check memory usage before processing request
@@ -197,10 +253,94 @@ def query_route():
         gc.collect()
         return jsonify({'error': 'Internal server error'}), 500
 
+
+@app.route('/tables-for-device', methods=['GET'])
+def tables_for_device_route():
+    """
+    Find all tables that have data for a given device_id
+    
+    Query Parameters:
+        device_id (str, required): The device ID to search for
+    
+    Returns:
+        200: List of tables with data for the device, including:
+             - device_id: The searched device ID
+             - device_uid: The corresponding device UID from device_lookup
+             - tables_with_data: Array of tables containing data for this device
+               - table: Table name
+               - matched_by: Either 'device_id' or 'device_uid'
+             - count: Number of tables with data
+        400: Missing device_id parameter
+        404: Device not found in device_lookup table
+        500: Database error
+    """
+    try:
+        device_id = request.args.get('device_id')
+        if not device_id:
+            return jsonify({'error': 'missing device_id parameter'}), 400
+        
+        token_error = check_token()
+        if token_error:
+            return token_error
+        
+        # Get device_uid from device_lookup table
+        success, device_lookup, _ = query_table('device_lookup', ['`device_id` = %s'], [device_id])
+        device_uid = None
+        if success and device_lookup.get('data') and len(device_lookup['data']) > 0:
+            device_uid = device_lookup['data'][0].get('device_uid')
+        
+        if not device_uid:
+            logger.warning(f"Device {device_id} not found in device_lookup table")
+            return jsonify({'error': 'device_id not found', 'device_id': device_id}), 404
+        
+        # Get list of all tables
+        success, all_tables, status_code = get_all_tables()
+        if not success:
+            return jsonify({'error': 'failed to retrieve table list'}), status_code
+        
+        tables_with_data = []
+        
+        # Check each table for data matching device_id or device_uid
+        for table_name in all_tables:
+            if table_name == 'device_lookup':  # Skip device_lookup itself
+                continue
+            
+            # Try matching by device_id first
+            success, result, _ = query_table(table_name, ['`device_id` = %s'], [device_id], limit=1)
+            if success and result.get('count', 0) > 0:
+                tables_with_data.append({
+                    'table': table_name,
+                    'matched_by': 'device_id'
+                })
+                continue
+            
+            # Try matching by device_uid
+            if device_uid:
+                success, result, _ = query_table(table_name, ['`device_uid` = %s'], [device_uid], limit=1)
+                if success and result.get('count', 0) > 0:
+                    tables_with_data.append({
+                        'table': table_name,
+                        'matched_by': 'device_uid'
+                    })
+        
+        response_data = {
+            'device_id': device_id,
+            'device_uid': device_uid,
+            'tables_with_data': tables_with_data,
+            'count': len(tables_with_data)
+        }
+        
+        logger.info(f"Found {len(tables_with_data)} tables with data for device {device_id} (uid: {device_uid})")
+        return jsonify(response_data), 200
+    
+    except Exception as e:
+        logger.error(f"Error in tables_for_device_route: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+
 def main():
     """Entry point for the aware-filter command"""
     logger.info("Starting AWARE Webservice Receiver")
-    logger.info(f"Database: {DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}")
     
     app.run(
         host='0.0.0.0',
@@ -208,6 +348,7 @@ def main():
         ssl_context='adhoc',
         debug=False
     )
+
 
 if __name__ == '__main__':
     main()

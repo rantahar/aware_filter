@@ -8,6 +8,36 @@ from .connection import get_connection
 logger = logging.getLogger(__name__)
 
 
+def get_all_tables():
+    """
+    Get list of all tables in the database.
+    
+    Returns:
+        tuple: (success: bool, tables: list, status_code: int)
+    """
+    conn = get_connection()
+    if conn is None:
+        return False, [], 503
+    
+    try:
+        cursor = conn.cursor()
+        query_start = time.time()
+        
+        cursor.execute("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE()")
+        tables = [row[0] for row in cursor.fetchall()]
+        
+        query_time = (time.time() - query_start) * 1000
+        logger.info(f"Retrieved {len(tables)} tables from database | Query: {query_time:.1f}ms")
+        
+        return True, tables, 200
+    
+    except Error as e:
+        logger.error(f"Error retrieving tables: {e}")
+        return False, [], 500
+    finally:
+        cursor.close()
+
+
 def query_table(table_name, conditions=None, params=None, limit=None, offset=None):
     """
     Generic table query function with pagination support.
