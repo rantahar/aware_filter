@@ -167,14 +167,18 @@ def query_route():
     
     Query Parameters:
         table (str, required): Name of the table to query
-        device_id (str, optional): Filter by device_id column
-        device_uid (str, optional): Filter by device_uid column
+        device_id (str, optional): Filter by device_id column (supports comma-separated values for multiple IDs)
+        device_uid (str, optional): Filter by device_uid column (supports comma-separated values)
         timestamp (str, optional): Filter by exact timestamp
         start_time (str, optional): Filter records with timestamp >= start_time
         end_time (str, optional): Filter records with timestamp <= end_time
         limit (int, optional): Maximum records to return (default: 10000, max: 50000)
         offset (int, optional): Number of records to skip for pagination (default: 0)
-        <any_column> (str, optional): Filter by any table column using equality
+        <any_column> (str, optional): Filter by any table column using equality (supports comma-separated values)
+    
+    Examples:
+        Single device_id: /data?table=screen_sensor&device_id=device1
+        Multiple device_ids: /data?table=screen_sensor&device_id=device1,device2,device3
     
     Returns:
         200: Query successful with data, count, total_count, limit, offset, has_more
@@ -227,8 +231,17 @@ def query_route():
                 except ValueError:
                     return jsonify({'error': 'offset must be a valid integer'}), 400
             else:
-                conditions.append(f'`{key}` = %s')
-                params.append(value)
+                # Check if value contains comma-separated list for OR conditions
+                if ',' in value:
+                    values = [v.strip() for v in value.split(',') if v.strip()]
+                    if not values:
+                        return jsonify({'error': f'invalid comma-separated list for {key}'}), 400
+                    placeholders = ', '.join(['%s'] * len(values))
+                    conditions.append(f'`{key}` IN ({placeholders})')
+                    params.extend(values)
+                else:
+                    conditions.append(f'`{key}` = %s')
+                    params.append(value)
         
         success, response_dict, status_code = query_table(table_name, conditions, params, limit, offset)
         
@@ -276,43 +289,59 @@ def query_route():
 @app.route('/tables-for-device', methods=['GET'])
 def tables_for_device_route():
     """
-    Find all tables that have data for a given device_id
+    Find all tables that have data for one or more device_ids
     
     Query Parameters:
-        device_id (str, required): The device ID to search for
+        device_id (str, required): Single device ID or comma-separated list of device IDs
     
     Returns:
-        200: List of tables with data for the device, including:
-             - device_id: The searched device ID
-             - device_uid: The corresponding device UID from device_lookup
-             - tables_with_data: Array of tables containing data for this device
+        200: List of tables with data for the devices, including:
+             - device_ids: Array of requested device IDs
+             - device_uid_map: Dict mapping each device_id to its device_uid
+             - tables_with_data: Array of tables containing data for these devices
                - table: Table name
-               - matched_by: Either 'device_id' or 'device_uuid'
+               - matched_by: 'device_id', 'device_uid', or 'both'
+               - device_ids_matched: Array of device_ids that matched this table
              - count: Number of tables with data
-        400: Missing device_id parameter
-        404: Device not found in device_lookup table
+        400: Missing device_id parameter or invalid format
+        404: None of the device_ids found in device_lookup table
         500: Database error
+    
+    Examples:
+        Single device: /tables-for-device?device_id=device1
+        Multiple devices: /tables-for-device?device_id=device1,device2,device3
     """
     route_start_time = time.time()
     try:
-        device_id = request.args.get('device_id')
-        if not device_id:
+        device_id_param = request.args.get('device_id')
+        if not device_id_param:
             return jsonify({'error': 'missing device_id parameter'}), 400
         
         token_error = check_token()
         if token_error:
             return token_error
         
-        # Get device_uuid from device_lookup table (column is device_uuid, not device_uid)
-        success, device_lookup, _ = query_table('device_lookup', ['`device_uuid` = %s'], [device_id])
-        device_uid = None
-        if success and device_lookup.get('data') and len(device_lookup['data']) > 0:
-            device_uid = device_lookup['data'][0].get('id')
+        # Parse comma-separated device_ids
+        requested_device_ids = [d.strip() for d in device_id_param.split(',') if d.strip()]
+        if not requested_device_ids:
+            return jsonify({'error': 'invalid device_id format'}), 400
         
-        if not device_uid:
+        # Build device_uid map by looking up each device_id
+        device_uid_map = {}
+        for device_id in requested_device_ids:
+            success, device_lookup, _ = query_table('device_lookup', ['`device_uuid` = %s'], [device_id])
+            if success and device_lookup.get('data') and len(device_lookup['data']) > 0:
+                device_uid = device_lookup['data'][0].get('id')
+                device_uid_map[device_id] = device_uid
+        
+        if not device_uid_map:
             elapsed = time.time() - route_start_time
-            logger.warning(f"Device {device_id} not found in device_lookup table (took {elapsed:.3f}s)")
-            return jsonify({'error': 'device_id not found', 'device_id': device_id}), 404
+            logger.warning(f"None of the devices {requested_device_ids} found in device_lookup table (took {elapsed:.3f}s)")
+            return jsonify({
+                'error': 'device_ids not found',
+                'device_ids': requested_device_ids,
+                'found_count': 0
+            }), 404
         
         # Get list of all tables
         success, all_tables, status_code = get_all_tables()
@@ -321,47 +350,60 @@ def tables_for_device_route():
         
         tables_with_data = []
         
-        # Check each table for data matching device_id or device_uid
+        # Check each table for data matching any device_id or device_uid
         for table_name in all_tables:
             if table_name in ['device_lookup', 'aware_device', 'aware_log', 'mqtt_history', 'mqtt_history_transformed', 'encryption_skip_list', 'device_index']:
                 continue
             
-            if not table_name.endswith('_transformed'):
-                success, result, _ = table_has_data(table_name, ['`device_id` = %s'], [device_id])
-                if success and result:
-                    tables_with_data.append({
-                        'table': table_name,
-                        'matched_by': 'device_id'
-                    })
-                    continue
+            matched_by_list = set()
+            matched_device_ids_for_table = []
             
-            else:
-                if device_uid:
-                    success, result, _ = table_has_data(table_name, ['`device_uid` = %s'], [device_uid])
+            # Check non-transformed tables for device_id matches using IN clause
+            if not table_name.endswith('_transformed'):
+                placeholders = ', '.join(['%s'] * len(requested_device_ids))
+                success, result, _ = table_has_data(table_name, [f'`device_id` IN ({placeholders})'], requested_device_ids)
+                if success and result:
+                    matched_device_ids_for_table = requested_device_ids
+                    matched_by_list.add('device_id')
+            
+            # Check transformed tables for device_uid matches using IN clause
+            if table_name.endswith('_transformed'):
+                device_uids = list(device_uid_map.values())
+                if device_uids:
+                    placeholders = ', '.join(['%s'] * len(device_uids))
+                    success, result, _ = table_has_data(table_name, [f'`device_uid` IN ({placeholders})'], device_uids)
                     if success and result:
-                        # Remove "_transformed" suffix if present when matched by device_uid
-                        display_table_name = table_name
-                        if table_name.endswith('_transformed'):
-                            display_table_name = table_name[:-len('_transformed')]
-                        tables_with_data.append({
-                            'table': display_table_name,
-                            'matched_by': 'device_uid'
-                        })
+                        # Map back to original device_ids
+                        matched_device_ids_for_table = [did for did, duid in device_uid_map.items() if duid in device_uids]
+                        matched_by_list.add('device_uid')
+            
+            # If this table has data for any of our devices, add it to results
+            if matched_device_ids_for_table:
+                # Remove "_transformed" suffix if present for display
+                display_table_name = table_name
+                if table_name.endswith('_transformed'):
+                    display_table_name = table_name[:-len('_transformed')]
+                
+                tables_with_data.append({
+                    'table': display_table_name,
+                    'matched_by': ','.join(sorted(matched_by_list)),
+                    'device_ids_matched': sorted(matched_device_ids_for_table)
+                })
         
         response_data = {
-            'device_id': device_id,
-            'device_uid': device_uid,
+            'device_ids': requested_device_ids,
+            'device_uid_map': device_uid_map,
             'tables_with_data': tables_with_data,
             'count': len(tables_with_data)
         }
         
         elapsed = time.time() - route_start_time
-        logger.info(f"Found {len(tables_with_data)} tables with data for device {device_id} (uid: {device_uid}) in {elapsed:.3f}s")
+        logger.info(f"Found {len(tables_with_data)} tables with data for {len(requested_device_ids)} devices in {elapsed:.3f}s")
         return jsonify(response_data), 200
     
     except Exception as e:
         elapsed = time.time() - route_start_time
-        logger.error(f"Error for device {device_id} in tables_for_device_route after {elapsed:.3f}s: {e}")
+        logger.error(f"Error in tables_for_device_route after {elapsed:.3f}s: {e}")
         return jsonify({'error': 'Internal server error'}), 500
 
 

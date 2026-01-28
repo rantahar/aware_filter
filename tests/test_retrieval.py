@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 from mysql.connector import Error as MySQLError
-from aware_filter.retrieval import query_table
+from aware_filter.retrieval import query_table, table_has_data
 
 
 examples = {
@@ -252,3 +252,186 @@ class TestQueryTable:
         assert status == 400
         assert 'limit cannot exceed' in response['error']
 
+
+class TestTableHasData:
+    """Test cases for the table_has_data function"""
+
+    @patch('aware_filter.retrieval.get_connection')
+    def test_table_has_data_with_existing_data(self, mock_get_connection):
+        """Test table_has_data returns True when data exists"""
+        # Setup mock
+        mock_cursor = MagicMock()
+        mock_cursor.fetchone.return_value = (1,)  # Row exists
+        mock_connection = MagicMock()
+        mock_connection.cursor.return_value = mock_cursor
+        mock_get_connection.return_value = mock_connection
+        
+        # Test
+        success, has_data, status_code = table_has_data('test_table', ['`device_id` = %s'], ['123'])
+        
+        # Assert
+        assert success is True
+        assert has_data is True
+        assert status_code == 200
+        mock_cursor.execute.assert_called_once()
+        mock_cursor.close.assert_called_once()
+    
+    @patch('aware_filter.retrieval.get_connection')
+    def test_table_has_data_with_no_data(self, mock_get_connection):
+        """Test table_has_data returns False when no data exists"""
+        # Setup mock
+        mock_cursor = MagicMock()
+        mock_cursor.fetchone.return_value = None  # No rows
+        mock_connection = MagicMock()
+        mock_connection.cursor.return_value = mock_cursor
+        mock_get_connection.return_value = mock_connection
+        
+        # Test
+        success, has_data, status_code = table_has_data('test_table', ['`device_id` = %s'], ['123'])
+        
+        # Assert
+        assert success is True
+        assert has_data is False
+        assert status_code == 200
+        mock_cursor.execute.assert_called_once()
+    
+    @patch('aware_filter.retrieval.get_connection')
+    def test_table_has_data_without_conditions(self, mock_get_connection):
+        """Test table_has_data without WHERE conditions"""
+        # Setup mock
+        mock_cursor = MagicMock()
+        mock_cursor.fetchone.return_value = (1,)
+        mock_connection = MagicMock()
+        mock_connection.cursor.return_value = mock_cursor
+        mock_get_connection.return_value = mock_connection
+        
+        # Test
+        success, has_data, status_code = table_has_data('test_table')
+        
+        # Assert
+        assert success is True
+        assert has_data is True
+        assert status_code == 200
+        # Check that query was executed without WHERE clause
+        call_args = mock_cursor.execute.call_args
+        assert 'WHERE' not in call_args[0][0]
+    
+    @patch('aware_filter.retrieval.get_connection')
+    def test_table_has_data_with_multiple_conditions(self, mock_get_connection):
+        """Test table_has_data with multiple WHERE conditions"""
+        # Setup mock
+        mock_cursor = MagicMock()
+        mock_cursor.fetchone.return_value = (1,)
+        mock_connection = MagicMock()
+        mock_connection.cursor.return_value = mock_cursor
+        mock_get_connection.return_value = mock_connection
+        
+        # Test
+        success, has_data, status_code = table_has_data(
+            'test_table',
+            ['`device_id` = %s', '`timestamp` >= %s'],
+            ['123', '2024-01-01']
+        )
+        
+        # Assert
+        assert success is True
+        assert has_data is True
+        # Verify both parameters were passed
+        mock_cursor.execute.assert_called_once()
+        call_args = mock_cursor.execute.call_args[0]
+        assert call_args[1] == ('123', '2024-01-01')
+    
+    @patch('aware_filter.retrieval.get_connection')
+    def test_table_has_data_with_invalid_table_name(self, mock_get_connection):
+        """Test table_has_data with empty table name"""
+        # Test
+        success, has_data, status_code = table_has_data('')
+        
+        # Assert
+        assert success is False
+        assert has_data is False
+        assert status_code == 400
+        mock_get_connection.assert_not_called()
+    
+    @patch('aware_filter.retrieval.get_connection')
+    def test_table_has_data_with_no_connection(self, mock_get_connection):
+        """Test table_has_data when database connection fails"""
+        # Setup mock
+        mock_get_connection.return_value = None
+        
+        # Test
+        success, has_data, status_code = table_has_data('test_table')
+        
+        # Assert
+        assert success is False
+        assert has_data is False
+        assert status_code == 503
+    
+    @patch('aware_filter.retrieval.get_connection')
+    def test_table_has_data_with_database_error(self, mock_get_connection):
+        """Test table_has_data when database query fails"""
+        # Setup mock
+        mock_cursor = MagicMock()
+        mock_cursor.execute.side_effect = MySQLError("Query error")
+        mock_connection = MagicMock()
+        mock_connection.cursor.return_value = mock_cursor
+        mock_get_connection.return_value = mock_connection
+        
+        # Test
+        success, has_data, status_code = table_has_data('test_table', ['`device_id` = %s'], ['123'])
+        
+        # Assert
+        assert success is False
+        assert has_data is False
+        assert status_code == 500
+        mock_cursor.close.assert_called_once()
+    
+    @patch('aware_filter.retrieval.get_connection')
+    def test_table_has_data_closes_cursor_on_success(self, mock_get_connection):
+        """Test that cursor is closed even on success"""
+        # Setup mock
+        mock_cursor = MagicMock()
+        mock_cursor.fetchone.return_value = (1,)
+        mock_connection = MagicMock()
+        mock_connection.cursor.return_value = mock_cursor
+        mock_get_connection.return_value = mock_connection
+        
+        # Test
+        success, has_data, status_code = table_has_data('test_table')
+        
+        # Assert
+        mock_cursor.close.assert_called_once()
+    
+    @patch('aware_filter.retrieval.get_connection')
+    def test_table_has_data_closes_cursor_on_error(self, mock_get_connection):
+        """Test that cursor is closed even on error"""
+        # Setup mock
+        mock_cursor = MagicMock()
+        mock_cursor.execute.side_effect = MySQLError("Query error")
+        mock_connection = MagicMock()
+        mock_connection.cursor.return_value = mock_cursor
+        mock_get_connection.return_value = mock_connection
+        
+        # Test
+        success, has_data, status_code = table_has_data('test_table')
+        
+        # Assert
+        mock_cursor.close.assert_called_once()
+    
+    @patch('aware_filter.retrieval.get_connection')
+    def test_table_has_data_uses_select_1_for_efficiency(self, mock_get_connection):
+        """Test that table_has_data uses SELECT 1 instead of SELECT *"""
+        # Setup mock
+        mock_cursor = MagicMock()
+        mock_cursor.fetchone.return_value = (1,)
+        mock_connection = MagicMock()
+        mock_connection.cursor.return_value = mock_cursor
+        mock_get_connection.return_value = mock_connection
+        
+        # Test
+        success, has_data, status_code = table_has_data('test_table', ['`device_id` = %s'], ['123'])
+        
+        # Assert
+        call_args = mock_cursor.execute.call_args[0][0]
+        assert 'SELECT 1' in call_args
+        assert 'SELECT *' not in call_args
