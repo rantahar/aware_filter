@@ -207,9 +207,35 @@ def query_route():
         limit = None
         offset = None
         
+        # Check if device_id is provided and needs to be converted to device_uid for transformed tables
+        device_id_param = request.args.get('device_id')
+        device_uids = None
+        
+        if device_id_param:
+            # Parse device_ids
+            device_ids = [d.strip() for d in device_id_param.split(',') if d.strip()]
+            
+            # Look up device_uids for the provided device_ids (for transformed table queries)
+            device_uids = []
+            for device_id in device_ids:
+                success, device_lookup, _ = query_table('device_lookup', ['`device_uuid` = %s'], [device_id])
+                if success and device_lookup.get('data') and len(device_lookup['data']) > 0:
+                    device_uid = device_lookup['data'][0].get('id')
+                    device_uids.append(device_uid)
+        
         for key, value in request.args.items():
             if key == 'table':  # Skip the table parameter
                 continue
+            elif key == 'device_id':  # Handle device_id specially
+                if device_id_param:
+                    device_ids = [d.strip() for d in device_id_param.split(',') if d.strip()]
+                    if len(device_ids) > 1:
+                        placeholders = ', '.join(['%s'] * len(device_ids))
+                        conditions.append(f'`device_id` IN ({placeholders})')
+                        params.extend(device_ids)
+                    else:
+                        conditions.append('`device_id` = %s')
+                        params.append(device_ids[0])
             elif key == 'start_time':
                 conditions.append('`timestamp` >= %s')
                 params.append(value)
@@ -231,7 +257,7 @@ def query_route():
                 except ValueError:
                     return jsonify({'error': 'offset must be a valid integer'}), 400
             else:
-                # Check if value contains comma-separated list for OR conditions
+                # Check if value contains comma-separated list for IN conditions
                 if ',' in value:
                     values = [v.strip() for v in value.split(',') if v.strip()]
                     if not values:
@@ -243,7 +269,54 @@ def query_route():
                     conditions.append(f'`{key}` = %s')
                     params.append(value)
         
-        success, response_dict, status_code = query_table(table_name, conditions, params, limit, offset)
+        # Query both original and transformed tables
+        all_data = []
+        
+        # Query original table with device_id
+        success, response_dict, status_code = query_table(table_name, conditions, params, limit=None, offset=None)
+        if success and response_dict.get('data'):
+            all_data.extend(response_dict['data'])
+        
+        # Query transformed table with device_uid if device_ids were provided and device_uids exist
+        if device_uids:
+            transformed_table_name = f"{table_name}_transformed"
+            transformed_conditions = [c for c in conditions if 'device_id' not in c]
+            transformed_params = [p for i, p in enumerate(params) if i not in [i for i, c in enumerate(conditions) if 'device_id' in c]]
+            
+            # Add device_uid condition
+            if len(device_uids) > 1:
+                placeholders = ', '.join(['%s'] * len(device_uids))
+                transformed_conditions.append(f'`device_uid` IN ({placeholders})')
+                transformed_params.extend(device_uids)
+            else:
+                transformed_conditions.append('`device_uid` = %s')
+                transformed_params.append(device_uids[0])
+            
+            success_t, response_dict_t, status_code_t = query_table(transformed_table_name, transformed_conditions, transformed_params, limit=None, offset=None)
+            if success_t and response_dict_t.get('data'):
+                all_data.extend(response_dict_t['data'])
+        
+        # Sort all data by timestamp if available
+        if all_data and 'timestamp' in all_data[0]:
+            all_data.sort(key=lambda x: x.get('timestamp', 0))
+        
+        # Apply limit and offset to combined results
+        total_count = len(all_data)
+        if offset is None:
+            offset = 0
+        if limit is None:
+            limit = 10000
+        
+        paginated_data = all_data[offset:offset + limit]
+        
+        response_dict = {
+            'data': paginated_data,
+            'count': len(paginated_data),
+            'total_count': total_count,
+            'limit': limit,
+            'offset': offset,
+            'has_more': (offset + len(paginated_data)) < total_count
+        }
         
         # Calculate request duration
         request_duration = (datetime.utcnow() - request_start_time).total_seconds()
@@ -254,7 +327,7 @@ def query_route():
         
         # Add warnings to response
         warnings = []
-        if 'total_count' in response_dict and response_dict['total_count'] > 100000:
+        if response_dict['total_count'] > 100000:
             warnings.append(f"Large dataset ({response_dict['total_count']} total records). Consider using pagination with limit and offset parameters.")
         
         if request_duration > 60:  # Warn if query takes more than 1 minute
@@ -266,7 +339,7 @@ def query_route():
         
         response_dict['query_duration_seconds'] = round(request_duration, 2)
         
-        return jsonify(response_dict), status_code
+        return jsonify(response_dict), 200
     
     except Exception as e:
         request_duration = (datetime.utcnow() - request_start_time).total_seconds()
