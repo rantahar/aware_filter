@@ -1,38 +1,21 @@
 """Data insertion module for AWARE Webservice Receiver"""
 
-import mysql.connector
 from mysql.connector import Error
 import logging
 from dotenv import load_dotenv
 import os
+from .connection import get_connection
 
 logger = logging.getLogger(__name__)
 
 load_dotenv()
-DB_CONFIG = {
-    'host': os.getenv('MYSQL_HOST', 'localhost'),
-    'port': int(os.getenv('MYSQL_PORT', 3306)),
-    'user': os.getenv('MYSQL_USER', 'root'),
-    'password': os.getenv('MYSQL_PASSWORD', ''),
-    'database': os.getenv('MYSQL_DATABASE', 'aware_database'),
-}
 
 STUDY_PASSWORD = os.getenv('STUDY_PASSWORD', 'aware_study_password')
 
 
-def get_db_connection():
-    """Establish a database connection."""
-    try:
-        connection = mysql.connector.connect(**DB_CONFIG)
-        return connection
-    except Error as e:
-        logger.error(f"Error connecting to database: {e}")
-        return None
-
-
 def insert_record(data, table_name, stats):
     """Insert a single record into the database."""
-    conn = get_db_connection()
+    conn = get_connection()
     if conn is None:
         return False, "Database connection failed"
     
@@ -57,7 +40,6 @@ def insert_record(data, table_name, stats):
         return False, str(e)
     finally:
         cursor.close()
-        conn.close()
 
 
 def insert_records(data, table_name, stats):

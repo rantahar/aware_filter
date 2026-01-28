@@ -41,19 +41,19 @@ examples = {
 class TestQueryTable:
     """Test cases for the query_table function"""
 
-    @patch('aware_filter.retrieval.get_db_connection')
+    @patch('aware_filter.retrieval.get_connection')
     @pytest.mark.parametrize("table_type,data_list", [
         ('sensor_data', examples['table_double']),
         ('text_events', examples['table_text'])
     ])
-    def test_query_table_with_device_id(self, mock_get_db, table_type, data_list):
+    def test_query_table_with_device_id(self, mock_get_conn, table_type, data_list):
         """Test retrieving data with device_id filter for both data types"""
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         mock_cursor.fetchall.return_value = data_list
         mock_cursor.fetchone.return_value = {'total': len(data_list)}  # Mock the count query
         mock_conn.cursor.return_value = mock_cursor
-        mock_get_db.return_value = mock_conn
+        mock_get_conn.return_value = mock_conn
 
         device_id = data_list[0]['device_id']
         conditions = ['`device_id` = %s']
@@ -69,21 +69,20 @@ class TestQueryTable:
         assert 'offset' in response
         assert 'has_more' in response
         mock_cursor.close.assert_called_once()
-        mock_conn.close.assert_called_once()
 
-    @patch('aware_filter.retrieval.get_db_connection')
+    @patch('aware_filter.retrieval.get_connection')
     @pytest.mark.parametrize("table_type,data_list", [
         ('sensor_data', examples['table_double']),
         ('text_events', examples['table_text'])
     ])
-    def test_query_table_no_conditions(self, mock_get_db, table_type, data_list):
+    def test_query_table_no_conditions(self, mock_get_conn, table_type, data_list):
         """Test retrieving all data without conditions for both data types"""
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         mock_cursor.fetchall.return_value = data_list
         mock_cursor.fetchone.return_value = {'total': len(data_list)}  # Mock the count query
         mock_conn.cursor.return_value = mock_cursor
-        mock_get_db.return_value = mock_conn
+        mock_get_conn.return_value = mock_conn
 
         success, response, status = query_table(table_type)
 
@@ -95,8 +94,8 @@ class TestQueryTable:
         assert 'offset' in response
         assert 'has_more' in response
 
-    @patch('aware_filter.retrieval.get_db_connection')
-    def test_query_table_missing_table(self, mock_get_db):
+    @patch('aware_filter.retrieval.get_connection')
+    def test_query_table_missing_table(self, mock_get_conn):
         """Test missing table parameter"""
         success, response, status = query_table(None)
 
@@ -104,19 +103,19 @@ class TestQueryTable:
         assert status == 400
         assert 'missing table name' in response['error']
 
-    @patch('aware_filter.retrieval.get_db_connection')
+    @patch('aware_filter.retrieval.get_connection')
     @pytest.mark.parametrize("table_type,data_list", [
         ('sensor_data', examples['table_double']),
         ('text_events', examples['table_text'])
     ])
-    def test_query_table_with_time_filters(self, mock_get_db, table_type, data_list):
+    def test_query_table_with_time_filters(self, mock_get_conn, table_type, data_list):
         """Test retrieving data with time range filters for both data types"""
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         mock_cursor.fetchall.return_value = data_list
         mock_cursor.fetchone.return_value = {'total': len(data_list)}  # Mock the count query
         mock_conn.cursor.return_value = mock_cursor
-        mock_get_db.return_value = mock_conn
+        mock_get_conn.return_value = mock_conn
 
         start_time = data_list[0]['timestamp']
         end_time = data_list[-1]['timestamp']
@@ -148,11 +147,11 @@ class TestQueryTable:
         assert start_time in params_used
         assert end_time in params_used
 
-    @patch('aware_filter.retrieval.get_db_connection')
+    @patch('aware_filter.retrieval.get_connection')
     @pytest.mark.parametrize("table_type", ['sensor_data', 'text_events'])
-    def test_query_table_db_connection_failed(self, mock_get_db, table_type):
+    def test_query_table_db_connection_failed(self, mock_get_conn, table_type):
         """Test handling of database connection failure for both data types"""
-        mock_get_db.return_value = None
+        mock_get_conn.return_value = None
 
         success, response, status = query_table(table_type)
         
@@ -160,15 +159,15 @@ class TestQueryTable:
         assert status == 503
         assert 'database connection failed' in response['error']
 
-    @patch('aware_filter.retrieval.get_db_connection')
+    @patch('aware_filter.retrieval.get_connection')
     @pytest.mark.parametrize("table_type", ['sensor_data', 'text_events'])
-    def test_query_table_mysql_error(self, mock_get_db, table_type):
+    def test_query_table_mysql_error(self, mock_get_conn, table_type):
         """Test handling of MySQL errors for both data types"""
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         mock_cursor.execute.side_effect = MySQLError("Table not found")
         mock_conn.cursor.return_value = mock_cursor
-        mock_get_db.return_value = mock_conn
+        mock_get_conn.return_value = mock_conn
 
         success, response, status = query_table(table_type)
         
@@ -176,18 +175,17 @@ class TestQueryTable:
         assert status == 500
         assert 'Table not found' in response['error']
         mock_cursor.close.assert_called_once()
-        mock_conn.close.assert_called_once()
 
-    @patch('aware_filter.retrieval.get_db_connection')
+    @patch('aware_filter.retrieval.get_connection')
     @pytest.mark.parametrize("table_type", ['sensor_data', 'text_events'])
-    def test_query_table_empty_result(self, mock_get_db, table_type):
+    def test_query_table_empty_result(self, mock_get_conn, table_type):
         """Test retrieving data when no records match for both data types"""
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         mock_cursor.fetchall.return_value = []
         mock_cursor.fetchone.return_value = {'total': 0}  # Mock the count query
         mock_conn.cursor.return_value = mock_cursor
-        mock_get_db.return_value = mock_conn
+        mock_get_conn.return_value = mock_conn
 
         success, response, status = query_table(table_type)
         
@@ -198,19 +196,19 @@ class TestQueryTable:
         assert response['total_count'] == 0
         assert 'has_more' in response
 
-    @patch('aware_filter.retrieval.get_db_connection')
+    @patch('aware_filter.retrieval.get_connection')
     @pytest.mark.parametrize("table_type,data_list", [
         ('sensor_data', examples['table_double']),
         ('text_events', examples['table_text'])
     ])
-    def test_query_table_multiple_results(self, mock_get_db, table_type, data_list):
+    def test_query_table_multiple_results(self, mock_get_conn, table_type, data_list):
         """Test retrieving multiple records from both data types"""
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         mock_cursor.fetchall.return_value = data_list
         mock_cursor.fetchone.return_value = {'total': len(data_list)}  # Mock the count query
         mock_conn.cursor.return_value = mock_cursor
-        mock_get_db.return_value = mock_conn
+        mock_get_conn.return_value = mock_conn
 
         success, response, status = query_table(table_type)
 
@@ -221,19 +219,19 @@ class TestQueryTable:
         assert response['total_count'] == len(data_list)
         assert 'has_more' in response
 
-    @patch('aware_filter.retrieval.get_db_connection')
+    @patch('aware_filter.retrieval.get_connection')
     @pytest.mark.parametrize("table_type,data_list", [
         ('sensor_data', examples['table_double']),
         ('text_events', examples['table_text'])
     ])
-    def test_query_table_with_pagination(self, mock_get_db, table_type, data_list):
+    def test_query_table_with_pagination(self, mock_get_conn, table_type, data_list):
         """Test retrieving data with limit and offset pagination"""
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         mock_cursor.fetchall.return_value = [data_list[0]]
         mock_cursor.fetchone.return_value = {'total': len(data_list)}  # Mock the count query
         mock_conn.cursor.return_value = mock_cursor
-        mock_get_db.return_value = mock_conn
+        mock_get_conn.return_value = mock_conn
 
         success, response, status = query_table(table_type, limit=1, offset=0)
 
@@ -245,8 +243,8 @@ class TestQueryTable:
         assert response['total_count'] == len(data_list)
         assert response['has_more'] is True  # Since total is 2 but we only returned 1
 
-    @patch('aware_filter.retrieval.get_db_connection')
-    def test_query_table_limit_exceeds_max(self, mock_get_db):
+    @patch('aware_filter.retrieval.get_connection')
+    def test_query_table_limit_exceeds_max(self, mock_get_conn):
         """Test that limit exceeding MAX_LIMIT is rejected"""
         success, response, status = query_table('sensor_data', limit=100000)
 

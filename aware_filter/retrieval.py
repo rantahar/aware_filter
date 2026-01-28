@@ -1,31 +1,10 @@
 """Data retrieval module for AWARE Webservice Receiver"""
 
-import mysql.connector
 from mysql.connector import Error
 import logging
-from dotenv import load_dotenv
-import os
+from .connection import get_connection
 
 logger = logging.getLogger(__name__)
-
-load_dotenv()
-DB_CONFIG = {
-    'host': os.getenv('MYSQL_HOST', 'localhost'),
-    'port': int(os.getenv('MYSQL_PORT', 3306)),
-    'user': os.getenv('MYSQL_USER', 'root'),
-    'password': os.getenv('MYSQL_PASSWORD', ''),
-    'database': os.getenv('MYSQL_DATABASE', 'aware_database'),
-}
-
-
-def get_db_connection():
-    """Establish a database connection."""
-    try:
-        connection = mysql.connector.connect(**DB_CONFIG)
-        return connection
-    except Error as e:
-        logger.error(f"Error connecting to database: {e}")
-        return None
 
 
 def query_table(table_name, conditions=None, params=None, limit=None, offset=None):
@@ -57,7 +36,7 @@ def query_table(table_name, conditions=None, params=None, limit=None, offset=Non
     if offset is None:
         offset = 0
     
-    conn = get_db_connection()
+    conn = get_connection()
     if conn is None:
         return False, {'error': 'database connection failed'}, 503
     
@@ -113,4 +92,3 @@ def query_table(table_name, conditions=None, params=None, limit=None, offset=Non
         return False, {'error': str(e)}, 500
     finally:
         cursor.close()
-        conn.close()

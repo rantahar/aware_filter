@@ -13,8 +13,9 @@ from datetime import datetime
 from dotenv import load_dotenv
 import os
 from .auth import login, check_token
-from .insertion import insert_records, get_db_connection, DB_CONFIG, STUDY_PASSWORD
+from .insertion import insert_records, STUDY_PASSWORD
 from .retrieval import query_table
+from .connection import get_connection, close_connection
 
 load_dotenv()
 
@@ -26,6 +27,12 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Register shutdown handler to close database connection
+@app.teardown_appcontext
+def shutdown_connection(exception=None):
+    """Close database connection on app shutdown."""
+    close_connection()
 
 def check_memory_usage():
     """Check current memory usage and log warnings if high"""
@@ -77,9 +84,8 @@ def webservice_table_route(study_id, password, table_name):
 @app.route('/health', methods=['GET'])
 def health():
     """Health check endpoint"""
-    conn = get_db_connection()
+    conn = get_connection()
     if conn:
-        conn.close()
         return jsonify({'status': 'healthy', 'database': 'connected'}), 200
     else:
         return jsonify({'status': 'unhealthy', 'database': 'disconnected'}), 503

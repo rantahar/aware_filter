@@ -40,17 +40,17 @@ examples = {
 class TestInsertRecord:
     """Test cases for the insert_record function"""
 
-    @patch('aware_filter.insertion.get_db_connection')
+    @patch('aware_filter.insertion.get_connection')
     @pytest.mark.parametrize("table_type,data_list", [
         ('sensor_data', examples['table_double']),
         ('text_events', examples['table_text'])
     ])
-    def test_insert_record_success(self, mock_get_db, table_type, data_list):
+    def test_insert_record_success(self, mock_get_conn, table_type, data_list):
         """Test successful data insertion for both double values and text data"""
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         mock_conn.cursor.return_value = mock_cursor
-        mock_get_db.return_value = mock_conn
+        mock_get_conn.return_value = mock_conn
 
         stats = {'successful_inserts': 0, 'failed_inserts': 0}
         data = data_list[0]  # Use first example from each table type
@@ -64,16 +64,15 @@ class TestInsertRecord:
         mock_cursor.execute.assert_called_once()
         mock_conn.commit.assert_called_once()
         mock_cursor.close.assert_called_once()
-        mock_conn.close.assert_called_once()
 
-    @patch('aware_filter.insertion.get_db_connection')
+    @patch('aware_filter.insertion.get_connection')
     @pytest.mark.parametrize("table_type,data_list", [
         ('sensor_data', examples['table_double']),
         ('text_events', examples['table_text'])
     ])
-    def test_insert_record_db_connection_failed(self, mock_get_db, table_type, data_list):
+    def test_insert_record_db_connection_failed(self, mock_get_conn, table_type, data_list):
         """Test insertion when database connection fails for both data types"""
-        mock_get_db.return_value = None
+        mock_get_conn.return_value = None
 
         stats = {'successful_inserts': 0, 'failed_inserts': 0}
         data = data_list[0]
@@ -84,18 +83,18 @@ class TestInsertRecord:
         assert stats['successful_inserts'] == 0
         assert stats['failed_inserts'] == 0
 
-    @patch('aware_filter.insertion.get_db_connection')
+    @patch('aware_filter.insertion.get_connection')
     @pytest.mark.parametrize("table_type,data_list", [
         ('sensor_data', examples['table_double']),
         ('text_events', examples['table_text'])
     ])
-    def test_insert_record_mysql_error(self, mock_get_db, table_type, data_list):
+    def test_insert_record_mysql_error(self, mock_get_conn, table_type, data_list):
         """Test insertion when MySQL error occurs for both data types"""
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         mock_cursor.execute.side_effect = MySQLError("Duplicate entry")
         mock_conn.cursor.return_value = mock_cursor
-        mock_get_db.return_value = mock_conn
+        mock_get_conn.return_value = mock_conn
 
         stats = {'successful_inserts': 0, 'failed_inserts': 0}
         data = data_list[0]
@@ -106,19 +105,18 @@ class TestInsertRecord:
         assert stats['successful_inserts'] == 0
         assert stats['failed_inserts'] == 1
         mock_cursor.close.assert_called_once()
-        mock_conn.close.assert_called_once()
 
-    @patch('aware_filter.insertion.get_db_connection')
+    @patch('aware_filter.insertion.get_connection')
     @pytest.mark.parametrize("table_type,data_list", [
         ('sensor_data', examples['table_double']),
         ('text_events', examples['table_text'])
     ])
-    def test_insert_record_builds_correct_query(self, mock_get_db, table_type, data_list):
+    def test_insert_record_builds_correct_query(self, mock_get_conn, table_type, data_list):
         """Test that the INSERT query is built correctly for both data types"""
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         mock_conn.cursor.return_value = mock_cursor
-        mock_get_db.return_value = mock_conn
+        mock_get_conn.return_value = mock_conn
 
         stats = {'successful_inserts': 0, 'failed_inserts': 0}
         data = data_list[0]
