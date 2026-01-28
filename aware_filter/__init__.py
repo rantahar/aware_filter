@@ -323,30 +323,30 @@ def tables_for_device_route():
         
         # Check each table for data matching device_id or device_uid
         for table_name in all_tables:
-            if table_name == 'device_lookup':  # Skip device_lookup itself
+            if table_name in ['device_lookup', 'aware_device', 'aware_log']:  # Skip device_lookup itself
                 continue
             
-            # Try matching by device_id first
-            success, result, _ = query_table(table_name, ['`device_id` = %s'], [device_id], limit=1)
-            if success and result.get('count', 0) > 0:
-                tables_with_data.append({
-                    'table': table_name,
-                    'matched_by': 'device_id'
-                })
-                continue
-            
-            # Try matching by device_uid
-            if device_uid:
-                success, result, _ = query_table(table_name, ['`device_uid` = %s'], [device_uid], limit=1)
+            if not table_name.endswith('_transformed'):
+                success, result, _ = query_table(table_name, ['`device_id` = %s'], [device_id], limit=1)
                 if success and result.get('count', 0) > 0:
-                    # Remove "_transformed" suffix if present when matched by device_uid
-                    display_table_name = table_name
-                    if table_name.endswith('_transformed'):
-                        display_table_name = table_name[:-len('_transformed')]
                     tables_with_data.append({
-                        'table': display_table_name,
-                        'matched_by': 'device_uid'
+                        'table': table_name,
+                        'matched_by': 'device_id'
                     })
+                    continue
+            
+            else:
+                if device_uid:
+                    success, result, _ = query_table(table_name, ['`device_uid` = %s'], [device_uid], limit=1)
+                    if success and result.get('count', 0) > 0:
+                        # Remove "_transformed" suffix if present when matched by device_uid
+                        display_table_name = table_name
+                        if table_name.endswith('_transformed'):
+                            display_table_name = table_name[:-len('_transformed')]
+                        tables_with_data.append({
+                            'table': display_table_name,
+                            'matched_by': 'device_uid'
+                        })
         
         response_data = {
             'device_id': device_id,
