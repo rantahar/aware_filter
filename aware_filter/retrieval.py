@@ -3,9 +3,41 @@
 from mysql.connector import Error
 import logging
 import time
+import base64
 from .connection import get_connection
 
 logger = logging.getLogger(__name__)
+
+
+def serialize_for_json(data):
+    """
+    Convert database records to JSON-serializable format.
+    Handles bytes objects by converting to base64-encoded strings.
+    
+    Args:
+        data: List of dictionaries from database cursor
+    
+    Returns:
+        List of dictionaries with all values JSON-serializable
+    """
+    if not data:
+        return data
+    
+    serialized = []
+    for record in data:
+        if isinstance(record, dict):
+            new_record = {}
+            for key, value in record.items():
+                if isinstance(value, bytes):
+                    # Encode bytes as base64 string
+                    new_record[key] = base64.b64encode(value).decode('utf-8')
+                else:
+                    new_record[key] = value
+            serialized.append(new_record)
+        else:
+            serialized.append(record)
+    
+    return serialized
 
 
 def table_has_data(table_name, conditions=None, params=None):
@@ -156,18 +188,21 @@ def query_table(table_name, conditions=None, params=None, limit=None, offset=Non
         fetch_time = time.time() - fetch_start
         
         serialize_start = time.time()
+        # Convert bytes to base64 strings for JSON serialization
+        serialized_results = serialize_for_json(results)
+        
         response_data = {
-            'data': results, 
-            'count': len(results),
+            'data': serialized_results, 
+            'count': len(serialized_results),
             'total_count': total_count,
             'limit': limit,
             'offset': offset,
-            'has_more': (offset + len(results)) < total_count
+            'has_more': (offset + len(serialized_results)) < total_count
         }
         serialize_time = time.time() - serialize_start
         total_time = time.time() - operation_start
         
-        logger.info(f"Retrieved {len(results)} records from {table_name} (total: {total_count}) | Count: {count_time*1000:.1f}ms | Query: {query_execute_time*1000:.1f}ms | Fetch: {fetch_time*1000:.1f}ms | Serialize: {serialize_time*1000:.2f}ms | Total: {total_time*1000:.1f}ms")
+        logger.info(f"Retrieved {len(serialized_results)} records from {table_name} (total: {total_count}) | Count: {count_time*1000:.1f}ms | Query: {query_execute_time*1000:.1f}ms | Fetch: {fetch_time*1000:.1f}ms | Serialize: {serialize_time*1000:.2f}ms | Total: {total_time*1000:.1f}ms")
         
         return True, response_data, 200
     
