@@ -9,6 +9,7 @@ from flask import Flask, jsonify, request
 import logging
 import psutil
 import gc
+import time
 from datetime import datetime
 from dotenv import load_dotenv
 import os
@@ -67,6 +68,7 @@ def webservice_table_route(study_id, password, table_name):
         401: Invalid password
         500: Database error or insertion failure
     """
+    route_start_time = time.time()
     if password != STUDY_PASSWORD:
         logger.warning(f"Unauthorized attempt: study_id={study_id}, table={table_name}")
         stats['unauthorized_attempts'] += 1
@@ -79,12 +81,17 @@ def webservice_table_route(study_id, password, table_name):
         success, response_dict = insert_records(data, table_name, stats)
         
         if success:
+            elapsed = time.time() - route_start_time
+            logger.info(f"webservice_table_route completed in {elapsed:.3f}s")
             return jsonify(response_dict), 200
         else:
+            elapsed = time.time() - route_start_time
+            logger.info(f"webservice_table_route completed in {elapsed:.3f}s (failure)")
             return jsonify(response_dict), 500
         
     except Exception as e:
-        logger.error(f"Error processing request: {e}")
+        elapsed = time.time() - route_start_time
+        logger.error(f"Error processing request after {elapsed:.3f}s: {e}")
         return jsonify({'error': str(e)}), 500
 
 
@@ -97,10 +104,14 @@ def health():
         200: Service is healthy and database is connected
         503: Database connection failed or service is unhealthy
     """
+    route_start_time = time.time()
     conn = get_connection()
+    elapsed = time.time() - route_start_time
     if conn:
+        logger.debug(f"health endpoint completed in {elapsed:.3f}s")
         return jsonify({'status': 'healthy', 'database': 'connected'}), 200
     else:
+        logger.debug(f"health endpoint completed in {elapsed:.3f}s (unhealthy)")
         return jsonify({'status': 'unhealthy', 'database': 'disconnected'}), 503
 
 
@@ -116,7 +127,8 @@ def get_stats():
         - failed_inserts: Failed data insertions
         - unauthorized_attempts: Failed authentication attempts
     """
-    return jsonify({
+    route_start_time = time.time()
+    result = jsonify({
         'service': 'AWARE Webservice Receiver',
         'timestamp': datetime.utcnow().isoformat(),
         'stats': stats,
@@ -124,7 +136,10 @@ def get_stats():
             '/webservice/index/<study_id>/<password>',
             '/webservice/index/<study_id>/<password>/<table_name>'
         ]
-    }), 200
+    })
+    elapsed = time.time() - route_start_time
+    logger.debug(f"stats endpoint completed in {elapsed:.3f}s")
+    return result, 200
 
 @app.route('/login', methods=['POST'])
 def login_route():
@@ -138,7 +153,11 @@ def login_route():
         200: Authentication successful, returns JWT token
         401: Authentication failed
     """
-    return login(stats)
+    route_start_time = time.time()
+    result = login(stats)
+    elapsed = time.time() - route_start_time
+    logger.info(f"login endpoint completed in {elapsed:.3f}s")
+    return result
 
 
 @app.route('/data', methods=['GET'])
@@ -274,6 +293,7 @@ def tables_for_device_route():
         404: Device not found in device_lookup table
         500: Database error
     """
+    route_start_time = time.time()
     try:
         device_id = request.args.get('device_id')
         if not device_id:
@@ -285,12 +305,13 @@ def tables_for_device_route():
         
         # Get device_uuid from device_lookup table (column is device_uuid, not device_uid)
         success, device_lookup, _ = query_table('device_lookup', ['`device_uuid` = %s'], [device_id])
-        device_uuid = None
+        device_uid = None
         if success and device_lookup.get('data') and len(device_lookup['data']) > 0:
             device_uid = device_lookup['data'][0].get('id')
         
         if not device_uid:
-            logger.warning(f"Device {device_id} not found in device_lookup table")
+            elapsed = time.time() - route_start_time
+            logger.warning(f"Device {device_id} not found in device_lookup table (took {elapsed:.3f}s)")
             return jsonify({'error': 'device_id not found', 'device_id': device_id}), 404
         
         # Get list of all tables
@@ -318,8 +339,12 @@ def tables_for_device_route():
             if device_uid:
                 success, result, _ = query_table(table_name, ['`device_uid` = %s'], [device_uid], limit=1)
                 if success and result.get('count', 0) > 0:
+                    # Remove "_transformed" suffix if present when matched by device_uid
+                    display_table_name = table_name
+                    if table_name.endswith('_transformed'):
+                        display_table_name = table_name[:-len('_transformed')]
                     tables_with_data.append({
-                        'table': table_name,
+                        'table': display_table_name,
                         'matched_by': 'device_uid'
                     })
         
@@ -330,11 +355,13 @@ def tables_for_device_route():
             'count': len(tables_with_data)
         }
         
-        logger.info(f"Found {len(tables_with_data)} tables with data for device {device_id} (uid: {device_uid})")
+        elapsed = time.time() - route_start_time
+        logger.info(f"Found {len(tables_with_data)} tables with data for device {device_id} (uid: {device_uid}) in {elapsed:.3f}s")
         return jsonify(response_data), 200
     
     except Exception as e:
-        logger.error(f"Error in tables_for_device_route: {e}")
+        elapsed = time.time() - route_start_time
+        logger.error(f"Error in tables_for_device_route after {elapsed:.3f}s: {e}")
         return jsonify({'error': 'Internal server error'}), 500
 
 
