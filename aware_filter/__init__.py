@@ -268,7 +268,7 @@ def tables_for_device_route():
              - device_uid: The corresponding device UID from device_lookup
              - tables_with_data: Array of tables containing data for this device
                - table: Table name
-               - matched_by: Either 'device_id' or 'device_uid'
+               - matched_by: Either 'device_id' or 'device_uuid'
              - count: Number of tables with data
         400: Missing device_id parameter
         404: Device not found in device_lookup table
@@ -283,11 +283,11 @@ def tables_for_device_route():
         if token_error:
             return token_error
         
-        # Get device_uid from device_lookup table
-        success, device_lookup, _ = query_table('device_lookup', ['`device_id` = %s'], [device_id])
-        device_uid = None
+        # Get device_uuid from device_lookup table (column is device_uuid, not device_uid)
+        success, device_lookup, _ = query_table('device_lookup', ['`device_uuid` = %s'], [device_id])
+        device_uuid = None
         if success and device_lookup.get('data') and len(device_lookup['data']) > 0:
-            device_uid = device_lookup['data'][0].get('device_uid')
+            device_uid = device_lookup['data'][0].get('id')
         
         if not device_uid:
             logger.warning(f"Device {device_id} not found in device_lookup table")
