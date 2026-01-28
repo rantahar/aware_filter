@@ -43,26 +43,6 @@ def query_table(table_name, conditions=None, params=None, limit=None, offset=Non
     try:
         cursor = conn.cursor(dictionary=True)
         
-        # First, get total count for pagination info
-        if conditions and params:
-            where_clause = ' AND '.join(conditions)
-            count_query = f"SELECT COUNT(*) as total FROM `{table_name}` WHERE {where_clause}"
-            cursor.execute(count_query, params)
-        else:
-            count_query = f"SELECT COUNT(*) as total FROM `{table_name}`"
-            cursor.execute(count_query)
-        
-        count_result = cursor.fetchone()
-        total_count = count_result['total'] if count_result and 'total' in count_result else 0
-        
-        # Check if the total count is reasonable for processing
-        try:
-            if isinstance(total_count, int) and total_count > 1000000 and limit > 10000:
-                logger.warning(f"Large dataset detected ({total_count} records). Consider using smaller limit and pagination.")
-        except (TypeError, ValueError):
-            # Handle case where total_count might be a mock or invalid value during testing
-            pass
-        
         # Build main query with pagination
         if conditions and params:
             where_clause = ' AND '.join(conditions)
@@ -74,15 +54,13 @@ def query_table(table_name, conditions=None, params=None, limit=None, offset=Non
         
         results = cursor.fetchall()
         
-        logger.info(f"Retrieved {len(results)} records from {table_name} (total: {total_count})")
+        logger.info(f"Retrieved {len(results)} records from {table_name}")
         
         response_data = {
             'data': results, 
             'count': len(results),
-            'total_count': total_count if isinstance(total_count, int) else len(results),
             'limit': limit,
-            'offset': offset,
-            'has_more': (offset + len(results)) < total_count if isinstance(total_count, int) else False
+            'offset': offset
         }
         
         return True, response_data, 200
