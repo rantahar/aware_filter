@@ -68,25 +68,38 @@ Handles data insertion into the database.
 - `MYSQL_DATABASE`: Database name (default: aware_database)
 
 ### 3. Retrieval Module (`retrieval.py`)
-Retrieves sensor data from the database with filtering.
+Retrieves sensor data from the database with flexible filtering and pagination support.
 
 **Functions:**
-- `query_data(table_name, device_id, device_uid, start_time, end_time)` - Query database
+
+- `query_table(table_name, conditions=None, params=None, limit=None, offset=None)` - Generic table query with pagination
   - **Parameters:**
-    - `table_name` (string): Table to query (required)
-    - `device_id` (string): Filter by device ID (optional)
-    - `device_uid` (string): Filter by device UID (optional)
-    - `start_time` (integer): Unix timestamp in milliseconds (optional)
-    - `end_time` (integer): Unix timestamp in milliseconds (optional)
-  - **Requirements:** Either `device_id` or `device_uid` must be provided
+    - `table_name` (string): Name of the table to query (required)
+    - `conditions` (list): WHERE clause conditions (e.g., `['`field` = %s', '`timestamp` >= %s']`)
+    - `params` (list): Parameter values corresponding to conditions (must match conditions length)
+    - `limit` (int): Maximum records to return (default: 10000, max: 50000)
+    - `offset` (int): Number of records to skip (default: 0)
   - **Returns:** `(success: bool, response_dict: dict, status_code: int)`
-  - **Response Format:** 
-    ```python
+  - **Response Format:**
+    ```json
     {
-        'count': int,        # Number of records returned
-        'data': [...]        # List of records matching criteria
+      "data": [...],           // Array of matching records
+      "count": 100,            // Number of records in this response
+      "total_count": 5000,     // Total matching records in database
+      "limit": 100,            // Applied limit
+      "offset": 0,             // Applied offset
+      "has_more": true         // Whether more records exist beyond this page
     }
     ```
+  - **Error Responses:**
+    - 400: Missing table name or invalid limit/offset
+    - 503: Database connection failed
+    - 500: Query execution error
+
+- `get_db_connection()` - Establish database connection
+  - **Returns:** MySQL connection object or `None` if connection failed
+  - Uses environment variables for DB configuration
+
 
 ## Error Handling
 
@@ -113,7 +126,6 @@ Retrieves sensor data from the database with filtering.
    - Check response for success/failure status
 
 3. **Data Retrieval:**
-   - Call `query_data()` with table name and device filters
    - Optionally filter by time range using start_time and end_time
    - Response contains matching records with record count
 

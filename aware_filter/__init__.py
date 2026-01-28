@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 import os
 from .auth import login, check_token
 from .insertion import insert_records, get_db_connection, DB_CONFIG, STUDY_PASSWORD
-from .retrieval import query_data, query_table
+from .retrieval import query_table
 
 load_dotenv()
 
