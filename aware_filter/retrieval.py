@@ -212,3 +212,252 @@ def query_table(table_name, conditions=None, params=None, limit=None, offset=Non
         return False, {'error': str(e)}, 500
     finally:
         cursor.close()
+
+def query_data(table_name, request_args):
+    """
+    Build and execute a complex query with pagination, filtering, and device UID lookups.
+    Handles both original tables (with device_id) and transformed tables (with device_uid).
+    
+    Args:
+        table_name: Name of the table to query
+        request_args: Flask request.args object containing query parameters
+    
+    Returns:
+        tuple: (success: bool, response_dict: dict, status_code: int)
+    """
+    try:
+        # Build WHERE conditions from query parameters
+        conditions = []
+        params = []
+        limit = None
+        offset = None
+        device_id_index = None  # Track which index device_id condition is at
+        device_id_param_count = 0  # Track how many device_id params
+        
+        # Check if device_id is provided and needs to be converted to device_uid for transformed tables
+        device_id_param = request_args.get('device_id')
+        device_uids = None
+        
+        if device_id_param:
+            # Parse device_ids
+            device_ids = [d.strip() for d in device_id_param.split(',') if d.strip()]
+            
+            # Look up device_uids for the provided device_ids (for transformed table queries)
+            device_uids = []
+            for device_id in device_ids:
+                success, device_lookup, _ = query_table('device_lookup', ['`device_uuid` = %s'], [device_id])
+                if success and device_lookup.get('data') and len(device_lookup['data']) > 0:
+                    device_uid = device_lookup['data'][0].get('id')
+                    device_uids.append(device_uid)
+        
+        for key, value in request_args.items():
+            if key == 'table':  # Skip the table parameter
+                continue
+            elif key == 'device_id':  # Handle device_id specially
+                if device_id_param:
+                    device_ids = [d.strip() for d in device_id_param.split(',') if d.strip()]
+                    device_id_index = len(conditions)  # Record where this condition is
+                    device_id_param_count = len(device_ids)  # Record how many params
+                    if len(device_ids) > 1:
+                        placeholders = ', '.join(['%s'] * len(device_ids))
+                        conditions.append(f'`device_id` IN ({placeholders})')
+                        params.extend(device_ids)
+                    else:
+                        conditions.append('`device_id` = %s')
+                        params.append(device_ids[0])
+            elif key == 'start_time':
+                conditions.append('`timestamp` >= %s')
+                params.append(value)
+            elif key == 'end_time':
+                conditions.append('`timestamp` <= %s')
+                params.append(value)
+            elif key == 'limit':
+                try:
+                    limit = int(value)
+                    if limit <= 0:
+                        return False, {'error': 'limit must be positive'}, 400
+                except ValueError:
+                    return False, {'error': 'limit must be a valid integer'}, 400
+            elif key == 'offset':
+                try:
+                    offset = int(value)
+                    if offset < 0:
+                        return False, {'error': 'offset must be non-negative'}, 400
+                except ValueError:
+                    return False, {'error': 'offset must be a valid integer'}, 400
+            else:
+                # Check if value contains comma-separated list for IN conditions
+                if ',' in value:
+                    values = [v.strip() for v in value.split(',') if v.strip()]
+                    if not values:
+                        return False, {'error': f'invalid comma-separated list for {key}'}, 400
+                    placeholders = ', '.join(['%s'] * len(values))
+                    conditions.append(f'`{key}` IN ({placeholders})')
+                    params.extend(values)
+                else:
+                    conditions.append(f'`{key}` = %s')
+                    params.append(value)
+        
+        # Query both original and transformed tables
+        all_data = []
+        
+        # Query original table with device_id
+        success, response_dict, status_code = query_table(table_name, conditions, params, limit=None, offset=None)
+        if success and response_dict.get('data'):
+            all_data.extend(response_dict['data'])
+        
+        # Query transformed table with device_uid if device_ids were provided and device_uids exist
+        if device_uids:
+            transformed_table_name = f"{table_name}_transformed"
+            # Build transformed conditions by excluding device_id condition and replacing with device_uid
+            transformed_conditions = []
+            transformed_params = []
+            
+            param_offset = 0  # Track how many params we've consumed
+            
+            for i, condition in enumerate(conditions):
+                param_count = condition.count('%s')  # How many params this condition uses
+                
+                if i == device_id_index:
+                    # Skip device_id condition and its params
+                    param_offset += param_count
+                    continue
+                
+                # Add this condition to transformed conditions
+                transformed_conditions.append(condition)
+                # Add the corresponding params
+                transformed_params.extend(params[param_offset:param_offset + param_count])
+                param_offset += param_count
+            
+            # Add device_uid condition
+            if len(device_uids) > 1:
+                placeholders = ', '.join(['%s'] * len(device_uids))
+                transformed_conditions.append(f'`device_uid` IN ({placeholders})')
+                transformed_params.extend(device_uids)
+            else:
+                transformed_conditions.append('`device_uid` = %s')
+                transformed_params.append(device_uids[0])
+            
+            success_t, response_dict_t, status_code_t = query_table(transformed_table_name, transformed_conditions, transformed_params, limit=None, offset=None)
+            if success_t and response_dict_t.get('data'):
+                all_data.extend(response_dict_t['data'])
+        
+        # Sort all data by timestamp if available
+        if all_data and 'timestamp' in all_data[0]:
+            all_data.sort(key=lambda x: x.get('timestamp', 0))
+        
+        # Apply limit and offset to combined results
+        total_count = len(all_data)
+        if offset is None:
+            offset = 0
+        if limit is None:
+            limit = 10000
+        
+        paginated_data = all_data[offset:offset + limit]
+        
+        response_dict = {
+            'data': paginated_data,
+            'count': len(paginated_data),
+            'total_count': total_count,
+            'limit': limit,
+            'offset': offset,
+            'has_more': (offset + len(paginated_data)) < total_count
+        }
+        
+        return True, response_dict, 200
+    
+    except Exception as e:
+        logger.error(f"Error in query_data: {e}")
+        return False, {'error': str(e)}, 500
+
+
+def get_tables_for_devices(requested_device_ids):
+    """
+    Find all tables that have data for one or more device_ids.
+    
+    Args:
+        requested_device_ids: List of device IDs to search for
+    
+    Returns:
+        tuple: (success: bool, response_dict: dict, status_code: int)
+    """
+    try:
+        if not requested_device_ids:
+            return False, {'error': 'invalid device_id format'}, 400
+        
+        # Build device_uid map by looking up each device_id
+        device_uid_map = {}
+        for device_id in requested_device_ids:
+            success, device_lookup, _ = query_table('device_lookup', ['`device_uuid` = %s'], [device_id])
+            if success and device_lookup.get('data') and len(device_lookup['data']) > 0:
+                device_uid = device_lookup['data'][0].get('id')
+                device_uid_map[device_id] = device_uid
+        
+        if not device_uid_map:
+            logger.warning(f"None of the devices {requested_device_ids} found in device_lookup table")
+            return False, {
+                'error': 'device_ids not found',
+                'device_ids': requested_device_ids,
+                'found_count': 0
+            }, 404
+        
+        # Get list of all tables
+        success, all_tables, status_code = get_all_tables()
+        if not success:
+            return False, {'error': 'failed to retrieve table list'}, status_code
+        
+        tables_with_data = []
+        
+        # Check each table for data matching any device_id or device_uid
+        for table_name in all_tables:
+            if table_name in ['device_lookup', 'aware_device', 'aware_log', 'mqtt_history', 'mqtt_history_transformed', 'encryption_skip_list', 'device_index']:
+                continue
+            
+            matched_by_list = set()
+            matched_device_ids_for_table = []
+            
+            # Check non-transformed tables for device_id matches using IN clause
+            if not table_name.endswith('_transformed'):
+                placeholders = ', '.join(['%s'] * len(requested_device_ids))
+                success, result, _ = table_has_data(table_name, [f'`device_id` IN ({placeholders})'], requested_device_ids)
+                if success and result:
+                    matched_device_ids_for_table = requested_device_ids
+                    matched_by_list.add('device_id')
+            
+            # Check transformed tables for device_uid matches using IN clause
+            if table_name.endswith('_transformed'):
+                device_uids = list(device_uid_map.values())
+                if device_uids:
+                    placeholders = ', '.join(['%s'] * len(device_uids))
+                    success, result, _ = table_has_data(table_name, [f'`device_uid` IN ({placeholders})'], device_uids)
+                    if success and result:
+                        # Map back to original device_ids
+                        matched_device_ids_for_table = [did for did, duid in device_uid_map.items() if duid in device_uids]
+                        matched_by_list.add('device_uid')
+            
+            # If this table has data for any of our devices, add it to results
+            if matched_device_ids_for_table:
+                # Remove "_transformed" suffix if present for display
+                display_table_name = table_name
+                if table_name.endswith('_transformed'):
+                    display_table_name = table_name[:-len('_transformed')]
+                
+                tables_with_data.append({
+                    'table': display_table_name,
+                    'matched_by': ','.join(sorted(matched_by_list)),
+                    'device_ids_matched': sorted(matched_device_ids_for_table)
+                })
+        
+        response_data = {
+            'device_ids': requested_device_ids,
+            'device_uid_map': device_uid_map,
+            'tables_with_data': tables_with_data,
+            'count': len(tables_with_data)
+        }
+        
+        logger.info(f"Found {len(tables_with_data)} tables with data for {len(requested_device_ids)} devices")
+        return True, response_data, 200
+    
+    except Exception as e:
+        logger.error(f"Error in get_tables_for_devices: {e}")
+        return False, {'error': 'Internal server error'}, 500

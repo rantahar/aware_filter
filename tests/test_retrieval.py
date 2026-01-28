@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 from mysql.connector import Error as MySQLError
-from aware_filter.retrieval import query_table, table_has_data
+from aware_filter.retrieval import query_table, table_has_data, query_data, get_tables_for_devices
 
 
 examples = {
@@ -435,3 +435,439 @@ class TestTableHasData:
         call_args = mock_cursor.execute.call_args[0][0]
         assert 'SELECT 1' in call_args
         assert 'SELECT *' not in call_args
+
+class TestQueryData:
+    """Test cases for the query_data function"""
+
+    @patch('aware_filter.retrieval.query_table')
+    def test_query_data_single_device(self, mock_query_table):
+        """Test query_data with a single device_id"""
+        # Mock the device_lookup query
+        device_lookup_response = {
+            'data': [{'id': 'uuid_123'}],
+            'count': 1,
+            'total_count': 1,
+            'limit': 10000,
+            'offset': 0,
+            'has_more': False
+        }
+        
+        # Mock the main table query
+        main_table_response = {
+            'data': [
+                {'device_id': 'device_123', 'timestamp': 1706342400000, 'value': 23.5},
+                {'device_id': 'device_123', 'timestamp': 1706428800000, 'value': 25.0}
+            ],
+            'count': 2,
+            'total_count': 2,
+            'limit': 10000,
+            'offset': 0,
+            'has_more': False
+        }
+        
+        # Set up mock to return different values based on table name
+        def query_side_effect(table_name, conditions, params, limit=None, offset=None):
+            if table_name == 'device_lookup':
+                return True, device_lookup_response, 200
+            elif table_name == 'sensor_data':
+                return True, main_table_response, 200
+            return False, {}, 404
+        
+        mock_query_table.side_effect = query_side_effect
+        
+        # Create mock request args
+        mock_request_args = {
+            'table': 'sensor_data',
+            'device_id': 'device_123'
+        }
+        
+        # Test
+        success, response, status = query_data('sensor_data', mock_request_args)
+        
+        # Assert
+        assert success is True
+        assert status == 200
+        assert response['count'] == 2
+        assert response['total_count'] == 2
+        assert response['data'][0]['device_id'] == 'device_123'
+
+    @patch('aware_filter.retrieval.query_table')
+    def test_query_data_multiple_devices(self, mock_query_table):
+        """Test query_data with multiple device_ids"""
+        device_lookup_response = {
+            'data': [{'id': 'uuid_123'}],
+            'count': 1,
+            'total_count': 1,
+            'limit': 10000,
+            'offset': 0,
+            'has_more': False
+        }
+        
+        main_table_response = {
+            'data': [
+                {'device_id': 'device_123', 'timestamp': 1706342400000, 'value': 23.5},
+                {'device_id': 'device_456', 'timestamp': 1706342400000, 'value': 30.0}
+            ],
+            'count': 2,
+            'total_count': 2,
+            'limit': 10000,
+            'offset': 0,
+            'has_more': False
+        }
+        
+        def query_side_effect(table_name, conditions, params, limit=None, offset=None):
+            if table_name == 'device_lookup':
+                return True, device_lookup_response, 200
+            elif table_name == 'sensor_data':
+                return True, main_table_response, 200
+            return False, {}, 404
+        
+        mock_query_table.side_effect = query_side_effect
+        
+        mock_request_args = {
+            'table': 'sensor_data',
+            'device_id': 'device_123,device_456'
+        }
+        
+        # Test
+        success, response, status = query_data('sensor_data', mock_request_args)
+        
+        # Assert
+        assert success is True
+        assert status == 200
+        assert response['count'] == 2
+
+    @patch('aware_filter.retrieval.query_table')
+    def test_query_data_with_time_filters(self, mock_query_table):
+        """Test query_data with time range filters"""
+        main_table_response = {
+            'data': [
+                {'device_id': 'device_123', 'timestamp': 1706342400000, 'value': 23.5},
+                {'device_id': 'device_123', 'timestamp': 1706428800000, 'value': 25.0}
+            ],
+            'count': 2,
+            'total_count': 2,
+            'limit': 10000,
+            'offset': 0,
+            'has_more': False
+        }
+        
+        mock_query_table.return_value = (True, main_table_response, 200)
+        
+        mock_request_args = {
+            'table': 'sensor_data',
+            'start_time': '1706342400000',
+            'end_time': '1706428800000'
+        }
+        
+        # Test
+        success, response, status = query_data('sensor_data', mock_request_args)
+        
+        # Assert
+        assert success is True
+        assert status == 200
+        assert response['count'] == 2
+        
+        # Verify query_table was called with time conditions
+        calls = mock_query_table.call_args_list
+        assert any('`timestamp` >=' in str(call) for call in calls)
+
+    @patch('aware_filter.retrieval.query_table')
+    def test_query_data_invalid_limit(self, mock_query_table):
+        """Test query_data with invalid limit parameter"""
+        mock_request_args = {
+            'table': 'sensor_data',
+            'limit': 'invalid'
+        }
+        
+        # Test
+        success, response, status = query_data('sensor_data', mock_request_args)
+        
+        # Assert
+        assert success is False
+        assert status == 400
+        assert 'valid integer' in response['error']
+
+    @patch('aware_filter.retrieval.query_table')
+    def test_query_data_with_pagination(self, mock_query_table):
+        """Test query_data with limit and offset parameters"""
+        main_table_response = {
+            'data': [
+                {'device_id': 'device_123', 'timestamp': 1706342400000, 'value': 23.5}
+            ],
+            'count': 1,
+            'total_count': 10,
+            'limit': 1,
+            'offset': 0,
+            'has_more': True
+        }
+        
+        mock_query_table.return_value = (True, main_table_response, 200)
+        
+        mock_request_args = {
+            'table': 'sensor_data',
+            'limit': '1',
+            'offset': '0'
+        }
+        
+        # Test
+        success, response, status = query_data('sensor_data', mock_request_args)
+        
+        # Assert
+        assert success is True
+        assert status == 200
+        assert response['count'] == 1
+        assert response['limit'] == 1
+        assert response['offset'] == 0
+
+    @patch('aware_filter.retrieval.query_table')
+    def test_query_data_transformed_table_with_device_uid(self, mock_query_table):
+        """Test query_data queries both original and transformed tables"""
+        device_lookup_response = {
+            'data': [{'id': 'uuid_123'}],
+            'count': 1,
+            'total_count': 1,
+            'limit': 10000,
+            'offset': 0,
+            'has_more': False
+        }
+        
+        original_response = {
+            'data': [{'device_id': 'device_123', 'timestamp': 1706342400000, 'value': 23.5}],
+            'count': 1,
+            'total_count': 1,
+            'limit': 10000,
+            'offset': 0,
+            'has_more': False
+        }
+        
+        transformed_response = {
+            'data': [{'device_uid': 'uuid_123', 'timestamp': 1706428800000, 'value': 25.0}],
+            'count': 1,
+            'total_count': 1,
+            'limit': 10000,
+            'offset': 0,
+            'has_more': False
+        }
+        
+        def query_side_effect(table_name, conditions, params, limit=None, offset=None):
+            if table_name == 'device_lookup':
+                return True, device_lookup_response, 200
+            elif table_name == 'sensor_data':
+                return True, original_response, 200
+            elif table_name == 'sensor_data_transformed':
+                return True, transformed_response, 200
+            return False, {}, 404
+        
+        mock_query_table.side_effect = query_side_effect
+        
+        mock_request_args = {
+            'table': 'sensor_data',
+            'device_id': 'device_123'
+        }
+        
+        # Test
+        success, response, status = query_data('sensor_data', mock_request_args)
+        
+        # Assert
+        assert success is True
+        assert status == 200
+        # Should have combined data from both tables
+        assert response['count'] == 2
+        assert response['total_count'] == 2
+
+
+class TestGetTablesForDevices:
+    """Test cases for the get_tables_for_devices function"""
+
+    @patch('aware_filter.retrieval.table_has_data')
+    @patch('aware_filter.retrieval.get_all_tables')
+    @patch('aware_filter.retrieval.query_table')
+    def test_get_tables_for_single_device(self, mock_query_table, mock_get_all_tables, mock_table_has_data):
+        """Test get_tables_for_devices with a single device"""
+        # Mock device_lookup response
+        device_lookup_response = {
+            'data': [{'id': 'uuid_123'}],
+            'count': 1,
+            'total_count': 1,
+            'limit': 10000,
+            'offset': 0,
+            'has_more': False
+        }
+        mock_query_table.return_value = (True, device_lookup_response, 200)
+        
+        # Mock all tables
+        mock_get_all_tables.return_value = (True, ['device_lookup', 'sensor_data', 'gps_data'], 200)
+        
+        # Mock table_has_data to return data found
+        mock_table_has_data.return_value = (True, True, 200)
+        
+        # Test
+        requested_ids = ['device_123']
+        success, response, status = get_tables_for_devices(requested_ids)
+        
+        # Assert
+        assert success is True
+        assert status == 200
+        assert 'device_ids' in response
+        assert 'device_uid_map' in response
+        assert 'tables_with_data' in response
+        assert response['device_ids'] == requested_ids
+        assert 'device_123' in response['device_uid_map']
+        assert response['device_uid_map']['device_123'] == 'uuid_123'
+
+    @patch('aware_filter.retrieval.table_has_data')
+    @patch('aware_filter.retrieval.get_all_tables')
+    @patch('aware_filter.retrieval.query_table')
+    def test_get_tables_for_multiple_devices(self, mock_query_table, mock_get_all_tables, mock_table_has_data):
+        """Test get_tables_for_devices with multiple devices"""
+        def device_lookup_side_effect(table_name, conditions, params):
+            device_map = {
+                'device_123': 'uuid_123',
+                'device_456': 'uuid_456'
+            }
+            device_id = params[0]
+            if device_id in device_map:
+                return True, {
+                    'data': [{'id': device_map[device_id]}],
+                    'count': 1,
+                    'total_count': 1,
+                    'limit': 10000,
+                    'offset': 0,
+                    'has_more': False
+                }, 200
+            return False, {'data': []}, 404
+        
+        mock_query_table.side_effect = device_lookup_side_effect
+        mock_get_all_tables.return_value = (True, ['device_lookup', 'sensor_data'], 200)
+        mock_table_has_data.return_value = (True, True, 200)
+        
+        # Test
+        requested_ids = ['device_123', 'device_456']
+        success, response, status = get_tables_for_devices(requested_ids)
+        
+        # Assert
+        assert success is True
+        assert status == 200
+        assert len(response['device_uid_map']) == 2
+        assert response['device_uid_map']['device_123'] == 'uuid_123'
+        assert response['device_uid_map']['device_456'] == 'uuid_456'
+
+    @patch('aware_filter.retrieval.query_table')
+    def test_get_tables_for_devices_not_found(self, mock_query_table):
+        """Test get_tables_for_devices when device not found in lookup"""
+        mock_query_table.return_value = (True, {'data': []}, 200)
+        
+        # Test
+        requested_ids = ['nonexistent_device']
+        success, response, status = get_tables_for_devices(requested_ids)
+        
+        # Assert
+        assert success is False
+        assert status == 404
+        assert 'device_ids not found' in response['error']
+        assert response['found_count'] == 0
+
+    @patch('aware_filter.retrieval.table_has_data')
+    @patch('aware_filter.retrieval.get_all_tables')
+    @patch('aware_filter.retrieval.query_table')
+    def test_get_tables_for_devices_skips_system_tables(self, mock_query_table, mock_get_all_tables, mock_table_has_data):
+        """Test that get_tables_for_devices skips system tables"""
+        device_lookup_response = {
+            'data': [{'id': 'uuid_123'}],
+            'count': 1,
+            'total_count': 1,
+            'limit': 10000,
+            'offset': 0,
+            'has_more': False
+        }
+        mock_query_table.return_value = (True, device_lookup_response, 200)
+        
+        # Include system tables that should be skipped
+        all_tables = [
+            'device_lookup', 'aware_device', 'aware_log', 'mqtt_history',
+            'sensor_data', 'gps_data'
+        ]
+        mock_get_all_tables.return_value = (True, all_tables, 200)
+        mock_table_has_data.return_value = (True, True, 200)
+        
+        # Test
+        requested_ids = ['device_123']
+        success, response, status = get_tables_for_devices(requested_ids)
+        
+        # Assert
+        assert success is True
+        # Verify that table_has_data was called only for non-system tables
+        calls = mock_table_has_data.call_args_list
+        called_tables = [call[0][0] for call in calls]
+        
+        # Should not be called for system tables
+        assert 'device_lookup' not in called_tables
+        assert 'aware_device' not in called_tables
+        assert 'aware_log' not in called_tables
+
+    @patch('aware_filter.retrieval.table_has_data')
+    @patch('aware_filter.retrieval.get_all_tables')
+    @patch('aware_filter.retrieval.query_table')
+    def test_get_tables_for_devices_matches_by_type(self, mock_query_table, mock_get_all_tables, mock_table_has_data):
+        """Test that get_tables_for_devices tracks match type (device_id vs device_uid)"""
+        device_lookup_response = {
+            'data': [{'id': 'uuid_123'}],
+            'count': 1,
+            'total_count': 1,
+            'limit': 10000,
+            'offset': 0,
+            'has_more': False
+        }
+        mock_query_table.return_value = (True, device_lookup_response, 200)
+        
+        all_tables = ['device_lookup', 'sensor_data', 'sensor_data_transformed']
+        mock_get_all_tables.return_value = (True, all_tables, 200)
+        mock_table_has_data.return_value = (True, True, 200)
+        
+        # Test
+        requested_ids = ['device_123']
+        success, response, status = get_tables_for_devices(requested_ids)
+        
+        # Assert
+        assert success is True
+        tables_with_data = response['tables_with_data']
+        
+        # Verify tables are returned with matched_by field
+        for table_entry in tables_with_data:
+            assert 'table' in table_entry
+            assert 'matched_by' in table_entry
+            assert 'device_ids_matched' in table_entry
+
+    @patch('aware_filter.retrieval.table_has_data')
+    @patch('aware_filter.retrieval.get_all_tables')
+    @patch('aware_filter.retrieval.query_table')
+    def test_get_tables_for_devices_removes_transformed_suffix(self, mock_query_table, mock_get_all_tables, mock_table_has_data):
+        """Test that get_tables_for_devices removes _transformed suffix from table names"""
+        device_lookup_response = {
+            'data': [{'id': 'uuid_123'}],
+            'count': 1,
+            'total_count': 1,
+            'limit': 10000,
+            'offset': 0,
+            'has_more': False
+        }
+        mock_query_table.return_value = (True, device_lookup_response, 200)
+        
+        all_tables = ['device_lookup', 'sensor_data_transformed']
+        mock_get_all_tables.return_value = (True, all_tables, 200)
+        mock_table_has_data.return_value = (True, True, 200)
+        
+        # Test
+        requested_ids = ['device_123']
+        success, response, status = get_tables_for_devices(requested_ids)
+        
+        # Assert
+        assert success is True
+        tables_with_data = response['tables_with_data']
+        
+        # Verify that _transformed suffix is removed from display
+        for table_entry in tables_with_data:
+            assert not table_entry['table'].endswith('_transformed')
+            if 'sensor' in table_entry['table']:
+                assert table_entry['table'] == 'sensor_data'
