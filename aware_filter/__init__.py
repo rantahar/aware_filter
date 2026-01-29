@@ -29,6 +29,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+JOIN_STUDY_PASSWORD = "tokenwithnospecialcharatctersbutseveralfiretypepokemon"
+STUDY_ID = "Polalpha"
+CONFIG_FILE_PATH = os.getenv('CONFIG_FILE_PATH', 'aware_config.json')
+
+
+
 def check_memory_usage():
     """Check current memory usage and log warnings if high"""
     process = psutil.Process()

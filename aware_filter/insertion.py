@@ -12,6 +12,41 @@ load_dotenv()
 
 STUDY_PASSWORD = os.getenv('STUDY_PASSWORD', 'aware_study_password')
 
+# Limit collected data. This does not always work on client side.
+# Expressed in microseconds.
+general_rate_limit = 200000 # 5 Hz
+# Specific limits per table. (overrides general_rate_limit)
+rate_limits = {
+    'accelerometer': 200000,  # 5 Hz
+}
+
+
+def apply_rate_limit(data, table_name):
+    """
+    Apply the rate limit to incoming data.
+
+    Args:
+        data: Single record dict or list of records (dicts) with 'timestamp' field
+        table_name: Name of the table to determine specific rate limit
+    Returns:
+        Filtered list of records (or single record dict) adhering to the rate limit
+    """
+    # Handle single record dict - no rate limiting needed for single records
+    if isinstance(data, dict):
+        return data
+    
+    # Handle list of records
+    limit = rate_limits.get(table_name, general_rate_limit)
+    
+    last_timestamp = None
+    filtered_data = []
+    for record in data:
+        timestamp = record.get('timestamp')
+        if last_timestamp is None or (timestamp - last_timestamp) >= limit:
+            filtered_data.append(record)
+            last_timestamp = timestamp
+    return filtered_data
+
 
 def get_device_uid(device_id):
     """
@@ -173,7 +208,6 @@ def insert_record(data, table_name, stats):
 def insert_records(data, table_name, stats):
     """
     Insert records into the database.
-    Handles both single records and batches.
     
     Args:
         data: Either a single dict or list of dicts to insert
@@ -185,6 +219,8 @@ def insert_records(data, table_name, stats):
     """
     if not data:
         return False, {'error': 'no data'}
+    
+    data = apply_rate_limit(data, table_name)
     
     # Handle both single object and array of objects
     if isinstance(data, list):

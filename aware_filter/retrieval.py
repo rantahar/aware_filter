@@ -9,6 +9,7 @@ from .connection import get_connection
 logger = logging.getLogger(__name__)
 
 
+
 def serialize_for_json(data):
     """
     Convert database records to JSON-serializable format.
