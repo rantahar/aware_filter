@@ -8,7 +8,7 @@ from mysql.connector import Error
 from dotenv import load_dotenv
 import re
 import threading
-import pandas as pd
+from .pandas_backend import PandasCursor, PandasConnection
 
 logger = logging.getLogger(__name__)
 
@@ -28,114 +28,7 @@ DB_BACKEND = os.getenv('DB_BACKEND', 'mysql').lower()  # BACKEND: 'mysql' (defau
 _connection = None
 
 
-class PandasCursor:
-    def __init__(self, conn):
-        self._conn = conn
-        self._results = []
-        self._lastrowid = None
-
-    def _normalize_value(self, v):
-        if isinstance(v, (bytes, bytearray)):
-            return v.decode('utf-8', errors='ignore')
-        return v
-
-    def execute(self, query, params=None):
-        q = (query or "").strip()
-        qi = q.lower()
-
-        # INSERT INTO <table> ... VALUES
-        m_ins = re.match(r"insert\s+into\s+`?(\w+)`?(?:\s*\([^)]*\))?\s+values", qi, re.I)
-        if m_ins and params is not None:
-            table = m_ins.group(1)
-            if pd is None:
-                raise RuntimeError('pandas is required for memory DB backend')
-
-            if isinstance(params, (list, tuple)):
-                row = [self._normalize_value(v) for v in params]
-            else:
-                row = [self._normalize_value(params)]
-
-            with self._conn._lock:
-                df = self._conn._tables.get(table)
-                if df is None:
-                    cols = [f'col{i+1}' for i in range(len(row))]
-                    df = pd.DataFrame([row], columns=cols)
-                    df.index = pd.RangeIndex(start=1, stop=2)
-                    self._conn._tables[table] = df
-                    last_id = 1
-                else:
-                    if df.shape[1] < len(row):
-                        extra = len(row) - df.shape[1]
-                        for i in range(extra):
-                            df[f'col{df.shape[1] + i + 1}'] = None
-                    new_idx = int(df.index.max()) + 1 if len(df) > 0 else 1
-                    new_row = pd.DataFrame([row], columns=df.columns)
-                    new_row.index = pd.Index([new_idx])
-                    df = pd.concat([df, new_row])
-                    self._conn._tables[table] = df
-                    last_id = new_idx
-
-                self._lastrowid = last_id
-                self._results = []
-            return
-
-        # SELECT COUNT(*) FROM table
-        m_cnt = re.match(r'select\s+count\s*\(\s*\*\s*\)\s+from\s+`?(\w+)`?', qi, re.I)
-        if m_cnt:
-            table = m_cnt.group(1)
-            with self._conn._lock:
-                df = self._conn._tables.get(table)
-                count = int(df.shape[0]) if df is not None else 0
-                self._results = [(count,)]
-            return
-
-        # SELECT * FROM table
-        m_sel = re.match(r'select\s+\*\s+from\s+`?(\w+)`?', qi, re.I)
-        if m_sel:
-            table = m_sel.group(1)
-            with self._conn._lock:
-                df = self._conn._tables.get(table)
-                if df is None or df.shape[0] == 0:
-                    self._results = []
-                else:
-                    self._results = [tuple(map(self._normalize_value, row)) for row in df.itertuples(index=False, name=None)]
-            return
-
-        raise NotImplementedError(f"Query not supported by memory backend: {q}")
-
-    def fetchone(self):
-        return self._results[0] if self._results else None
-
-    def fetchall(self):
-        return list(self._results)
-
-    @property
-    def lastrowid(self):
-        return self._lastrowid
-
-    def close(self):
-        self._results = []
-
-
-class PandasConnection:
-    def __init__(self):
-        if pd is None:
-            raise RuntimeError('pandas is required for memory DB backend')
-        self._tables = {}
-        self._lock = threading.Lock()
-
-    def cursor(self):
-        return PandasCursor(self)
-
-    def commit(self):
-        return
-
-    def ping(self, reconnect=False, attempts=1, delay=0):
-        return True
-
-    def close(self):
-        with self._lock:
-            self._tables.clear()
+        
 
 
 def get_connection():
