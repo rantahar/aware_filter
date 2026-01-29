@@ -309,9 +309,11 @@ def main():
     """Entry point for the aware-filter command"""
     logger.info("Starting AWARE Webservice Receiver")
     
+    port = int(os.getenv('API_PORT', 3446))
+    
     app.run(
         host='0.0.0.0',
-        port=3446,
+        port=port,
         ssl_context='adhoc',
         debug=False
     )
