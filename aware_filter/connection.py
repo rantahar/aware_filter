@@ -6,9 +6,7 @@ import atexit
 import mysql.connector
 from mysql.connector import Error
 from dotenv import load_dotenv
-import re
-import threading
-from .pandas_backend import PandasCursor, PandasConnection
+from .pandas_backend import PandasConnection
 
 logger = logging.getLogger(__name__)
 
